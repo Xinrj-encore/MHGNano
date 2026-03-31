@@ -27,15 +27,12 @@ Protein-protein interactions are fundamental to biological processes. This proje
 ### Requirements
 
 - Python 3.8+
-- PyTorch 1.10+
-- CUDA (optional, for GPU acceleration)
+- PyTorch 1.12.1
+- CUDA
 
 ### Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/hypergraph-meta-ppi.git
-cd hypergraph-meta-ppi
 
 # Create virtual environment
 python -m venv venv
@@ -154,38 +151,4 @@ The core model consists of:
 
 See `configs/` directory for dataset-specific configurations.
 
-## Results
-
-Our model achieves competitive performance on cross-species PPI prediction:
-
-| Dataset | AUC-ROC | AUC-PR | F1 Score |
-|---------|---------|--------|----------|
-| Yuanhe | 0.85+ | 0.80+ | 0.75+ |
-| Zhenhe | 0.82+ | 0.78+ | 0.72+ |
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@article{yourpaper2024,
-  title={HyperGraph Meta-Learning for Cross-Species Protein-Protein Interaction Prediction},
-  author={Your Name},
-  journal={...},
-  year={2024}
-}
 ```
-
-## License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [DHG](https://github.com/iMoonLab/DeepHypergraph) library for hypergraph operations
-- [ESM](https://github.com/facebookresearch/esm) for protein language model embeddings
-- MAML implementation inspired by [Finn et al., 2017](https://arxiv.org/abs/1703.03400)
-
-## Contact
-
-For questions or issues, please open a GitHub issue or contact [your-email@example.com].
