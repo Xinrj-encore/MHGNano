@@ -1,0 +1,45 @@
+# Yuanhe Dataset Configuration
+# 4 species: 1326, 41514, 77635, 208964
+
+# Data paths
+data_root: "./data/yuanhe"
+model_size: "8M"  # ESM model size: 8M, 35M, 150M
+
+# Model architecture
+in_channels: 320   # ESM-8M embedding dimension
+hid_channels: 256  # Hidden layer dimension
+num_classes: 128   # Output embedding dimension
+
+# MAML hyperparameters
+inner_lr: 1e-3
+inner_steps: 5
+meta_lr: 1e-4
+
+# Training settings
+epochs: 20000
+meta_batch_size: 3
+n_support: 64
+n_query: 64
+seed: 42
+
+# Species list
+species:
+  - "1326"
+  - "41514"
+  - "77635"
+  - "208964"
+
+# Training species (all except last)
+train_species:
+  - "1326"
+  - "41514"
+  - "77635"
+
+# Test species (last one)
+test_species:
+  - "208964"
+
+# Output
+out_dir: "./output/yuanhe"
+save_every: 0
+patience: 5
