@@ -1,6 +1,7 @@
-"""
-Data loading and processing utilities.
-"""
+"""Data loading utilities for the reviewer-facing reproduction code."""
+
+from __future__ import annotations
+
 import os
 import pickle
 from typing import Dict, List, Optional, Tuple
@@ -8,35 +9,54 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from dhg import Hypergraph
 
+PairSplit = Tuple[List[List[int]], List[float]]
+SpeciesSplits = Dict[str, PairSplit]
+
 
 def build_hypergraph_from_pickle(
     pkl_path: str, num_nodes: Optional[int] = None
 ) -> Hypergraph:
-    """
-    Build hypergraph from pickle file.
-
-    Args:
-        pkl_path: Path to pickle file containing hyperedge list
-        num_nodes: Number of nodes (optional)
-
-    Returns:
-        Hypergraph object
-    """
-    with open(pkl_path, "rb") as f:
-        edge_list_data = pickle.load(f)
-    hg = Hypergraph(
-        edge_list_data["num_vertices"], edge_list_data["PPI_cliques_list"]
-    )
-    return hg
+    """Load a serialized clique-derived hypergraph."""
+    with open(pkl_path, "rb") as handle:
+        payload = pickle.load(handle)
+    n_vertices = int(payload["num_vertices"])
+    if num_nodes is not None and n_vertices != int(num_nodes):
+        raise ValueError(
+            f"Hypergraph vertex count ({n_vertices}) does not match "
+            f"the requested count ({num_nodes})."
+        )
+    return Hypergraph(n_vertices, payload["PPI_cliques_list"])
 
 
-def load_tensor_if_exists(
-    path: str, map_location=None
-) -> Optional[torch.Tensor]:
-    """Load tensor if file exists."""
-    if os.path.exists(path):
-        return torch.load(path, map_location=map_location)
-    return None
+def _load_tensor(path: str, device: Optional[torch.device]) -> torch.Tensor:
+    try:
+        tensor = torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        tensor = torch.load(path, map_location=device)
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError(f"Expected a tensor in {path}, found {type(tensor)!r}.")
+    return tensor.float()
+
+
+def _canonical_split(raw: object, fold: int, path: str) -> PairSplit:
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{path} does not contain any folds.")
+    if fold < 0 or fold >= len(raw):
+        raise IndexError(f"Fold {fold} is unavailable in {path} (n={len(raw)}).")
+
+    selected = raw[fold]
+    if not isinstance(selected, (list, tuple)) or len(selected) != 2:
+        raise ValueError(f"Fold {fold} in {path} must be [pairs, labels].")
+    pairs, labels = selected
+    if len(pairs) != len(labels):
+        raise ValueError(
+            f"Pair/label length mismatch in {path}, fold {fold}: "
+            f"{len(pairs)} != {len(labels)}."
+        )
+
+    normalized_pairs = [[int(pair[0]), int(pair[1])] for pair in pairs]
+    normalized_labels = [float(label) for label in labels]
+    return normalized_pairs, normalized_labels
 
 
 def load_species_data(
@@ -44,95 +64,50 @@ def load_species_data(
     data_root: str = "./data/yuanhe",
     model_size_tag: str = "8M",
     device: Optional[torch.device] = None,
-) -> Tuple[torch.Tensor, Hypergraph, List]:
+    fold: int = 0,
+) -> Tuple[torch.Tensor, Hypergraph, SpeciesSplits]:
+    """Load features, a hypergraph, and independent train/validation/test splits.
+
+    The split files contain five folds. Only the requested fold is loaded.
+    Validation and test pairs are deliberately kept separate: validation is
+    used for model selection and test is reserved for final evaluation.
     """
-    Load data for a specific species.
-
-    Args:
-        species: Species identifier
-        data_root: Root directory for data
-        model_size_tag: ESM model size (8M, 35M, 150M)
-        device: Device to load tensors to
-
-    Returns:
-        (X, hg, y): Features, hypergraph, and labels
-    """
-    sp_dir = os.path.join(data_root, species)
-
-    # Load hypergraph
-    hyper_pkl = os.path.join(
-        sp_dir, f"PPI_cliques_Hyperedge_{species}_{model_size_tag}.pkl"
+    species_dir = os.path.join(data_root, species)
+    hyper_path = os.path.join(
+        species_dir,
+        f"PPI_cliques_Hyperedge_{species}_{model_size_tag}.pkl",
     )
-    hg = build_hypergraph_from_pickle(hyper_pkl)
-
-    # Load features
-    X_path = os.path.join(
-        sp_dir, f"protein_feature_CT_{species}_{model_size_tag}.pt"
+    feature_path = os.path.join(
+        species_dir,
+        f"protein_feature_CT_{species}_{model_size_tag}.pt",
     )
-    X = load_tensor_if_exists(X_path, map_location=device)
-    if X is None:
-        raise FileNotFoundError(f"Missing feature tensor: {X_path}")
 
-    # Load train/val/test indices
-    with open(f"{data_root}/{species}/train_idx_{species}.pkl", "rb") as f:
-        train_idx = pickle.load(f)
-    with open(f"{data_root}/{species}/val_idx_{species}.pkl", "rb") as f:
-        val_idx = pickle.load(f)
-    with open(f"{data_root}/{species}/test_idx_{species}.pkl", "rb") as f:
-        test_idx = pickle.load(f)
+    if not os.path.exists(hyper_path):
+        raise FileNotFoundError(hyper_path)
+    if not os.path.exists(feature_path):
+        raise FileNotFoundError(feature_path)
 
-    # Combine support and query sets
-    support_idx = train_idx[0]
-    val_idx[0][0].extend(test_idx[0][0])
-    val_idx[0][1].extend(test_idx[0][1])
-    query_idx = val_idx[0]
+    features = _load_tensor(feature_path, device)
+    hypergraph = build_hypergraph_from_pickle(hyper_path, features.shape[0])
 
-    y = [support_idx, query_idx]
-    return X, hg, y
+    splits: SpeciesSplits = {}
+    for split_name in ("train", "val", "test"):
+        split_path = os.path.join(
+            species_dir, f"{split_name}_idx_{species}.pkl"
+        )
+        if not os.path.exists(split_path):
+            raise FileNotFoundError(split_path)
+        with open(split_path, "rb") as handle:
+            raw = pickle.load(handle)
+        splits[split_name] = _canonical_split(raw, fold, split_path)
 
-
-def make_task(
-    X: torch.Tensor,
-    hg: Hypergraph,
-    GP_info: torch.Tensor,
-    y: torch.Tensor,
-    n_support: int,
-    n_query: int,
-    shuffle: bool = True,
-) -> Dict[str, Tuple]:
-    """
-    Create a meta-learning task with support and query sets.
-
-    Args:
-        X: Node features
-        hg: Hypergraph
-        GP_info: Hyperedge indices
-        y: Labels
-        n_support: Number of support samples
-        n_query: Number of query samples
-        shuffle: Whether to shuffle data
-
-    Returns:
-        Task dictionary with 'support' and 'query' keys
-    """
-    N = X.size(0)
-    idx = torch.randperm(N) if shuffle else torch.arange(N)
-    assert n_support + n_query <= N
-
-    s_idx = idx[:n_support]
-    q_idx = idx[n_support : n_support + n_query]
-
-    support = (X[s_idx], hg, GP_info[s_idx], y[s_idx])
-    query = (X[q_idx], hg, GP_info[q_idx], y[q_idx])
-
-    return {"support": support, "query": query}
+    return features, hypergraph, splits
 
 
-def sample_meta_batch(
-    tasks: List[Dict[str, Tuple]], meta_batch_size: int
-) -> List[Dict[str, Tuple]]:
-    """Sample a batch of tasks for meta-training."""
-    if meta_batch_size <= len(tasks):
-        import random
-        return random.sample(tasks, meta_batch_size)
-    return tasks
+def sample_meta_batch(tasks: List[Dict[str, Tuple]], meta_batch_size: int):
+    """Sample species tasks without changing their pair split contents."""
+    import random
+
+    if meta_batch_size <= 0 or meta_batch_size >= len(tasks):
+        return tasks
+    return random.sample(tasks, meta_batch_size)

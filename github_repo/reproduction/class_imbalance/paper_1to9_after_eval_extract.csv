@@ -1,0 +1,25 @@
+ratio,ratio_label,data_protocol,task,task_label,metric,n,mean,sd,mean_sd
+9,1:9,original_paper_split,yuanhe,Prok. to Prok.,auroc,5,0.8964650439999999,0.012363727827070587,0.8965 +/- 0.0124
+9,1:9,original_paper_split,zhenhe,Euk. to Euk.,auroc,5,0.946667856,0.0025354605122600263,0.9467 +/- 0.0025
+9,1:9,original_paper_split,yz,Prok. to Euk.,auroc,5,0.8132689839999999,0.024697016300059993,0.8133 +/- 0.0247
+9,1:9,original_paper_split,zy,Euk. to Prok.,auroc,5,0.8456470640000001,0.012259942525100995,0.8456 +/- 0.0123
+9,1:9,original_paper_split,yuanhe,Prok. to Prok.,auprc,5,0.680176798,0.02539953071810227,0.6802 +/- 0.0254
+9,1:9,original_paper_split,zhenhe,Euk. to Euk.,auprc,5,0.837830724,0.004702189164621101,0.8378 +/- 0.0047
+9,1:9,original_paper_split,yz,Prok. to Euk.,auprc,5,0.556480434,0.04238866159233898,0.5565 +/- 0.0424
+9,1:9,original_paper_split,zy,Euk. to Prok.,auprc,5,0.553246684,0.02980909691246751,0.5532 +/- 0.0298
+9,1:9,original_paper_split,yuanhe,Prok. to Prok.,f1,5,0.619447408,0.02856286461227442,0.6194 +/- 0.0286
+9,1:9,original_paper_split,zhenhe,Euk. to Euk.,f1,5,0.740468376,0.008251698210818779,0.7405 +/- 0.0083
+9,1:9,original_paper_split,yz,Prok. to Euk.,f1,5,0.567514074,0.02357249947274749,0.5675 +/- 0.0236
+9,1:9,original_paper_split,zy,Euk. to Prok.,f1,5,0.5119378640000001,0.026810349941416855,0.5119 +/- 0.0268
+9,1:9,original_paper_split,yuanhe,Prok. to Prok.,precision,5,0.725689106,0.012657215410153626,0.7257 +/- 0.0127
+9,1:9,original_paper_split,zhenhe,Euk. to Euk.,precision,5,0.8153734480000001,0.004110254251116357,0.8154 +/- 0.0041
+9,1:9,original_paper_split,yz,Prok. to Euk.,precision,5,0.648542108,0.029418044714268815,0.6485 +/- 0.0294
+9,1:9,original_paper_split,zy,Euk. to Prok.,precision,5,0.609633416,0.02504551802100487,0.6096 +/- 0.0250
+9,1:9,original_paper_split,yuanhe,Prok. to Prok.,recall,5,0.540915804,0.03819679960334154,0.5409 +/- 0.0382
+9,1:9,original_paper_split,zhenhe,Euk. to Euk.,recall,5,0.6794743480000001,0.013695529495964,0.6795 +/- 0.0137
+9,1:9,original_paper_split,yz,Prok. to Euk.,recall,5,0.504924622,0.025263189416724854,0.5049 +/- 0.0253
+9,1:9,original_paper_split,zy,Euk. to Prok.,recall,5,0.441999016,0.032356409209674065,0.4420 +/- 0.0324
+9,1:9,original_paper_split,yuanhe,Prok. to Prok.,acc,5,0.877563636,0.006602934288244838,0.8776 +/- 0.0066
+9,1:9,original_paper_split,zhenhe,Euk. to Euk.,acc,5,0.9134363640000001,0.0019958258367603044,0.9134 +/- 0.0020
+9,1:9,original_paper_split,yz,Prok. to Euk.,acc,5,0.8608181720000001,0.007641962073919231,0.8608 +/- 0.0076
+9,1:9,original_paper_split,zy,Euk. to Prok.,acc,5,0.8446454300000001,0.006548872237500139,0.8446 +/- 0.0065

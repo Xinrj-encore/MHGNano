@@ -1,0 +1,6 @@
+scope,status,evidence
+MHGNano,verified,"src/utils/metrics.py applies sigmoid probabilities, p >= 0.5, and continuous AUROC/AUPRC"
+TRGH-PPI direct reproduction,verified,"30 seed-level rows record threshold=0.5"
+HIGH-PPI direct reproduction,verified,"30 seed-level rows record threshold=0.5"
+D-SCRIPT,verified_with_boundary_note,"default cutoff is 0.5; archived audit found one score exactly equal to 0.5"
+Other legacy baselines,protocol_recorded,"historical summary evidence is retained; complete source-level artifacts are not redistributed"

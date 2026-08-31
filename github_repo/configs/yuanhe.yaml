@@ -3,7 +3,7 @@
 
 # Data paths
 data_root: "./data/yuanhe"
-model_size: "8M"  # ESM model size: 8M, 35M, 150M
+model_size: "8M"  # ESM model size: 8M, 35M, 150M, 650M
 
 # Model architecture
 in_channels: 320   # ESM-8M embedding dimension
@@ -18,8 +18,6 @@ meta_lr: 1e-4
 # Training settings
 epochs: 20000
 meta_batch_size: 3
-n_support: 64
-n_query: 64
 seed: 42
 
 # Species list
@@ -35,11 +33,13 @@ train_species:
   - "41514"
   - "77635"
 
-# Test species (last one)
-test_species:
+# Held-out species (last one)
+held_out_species:
   - "208964"
 
 # Output
 out_dir: "./output/yuanhe"
 save_every: 0
 patience: 5
+threshold: 0.5
+fold: 0

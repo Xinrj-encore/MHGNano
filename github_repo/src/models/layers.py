@@ -1,6 +1,7 @@
-"""
-HyperGraph Neural Network layers for Protein-Protein Interaction prediction.
-"""
+"""Hypergraph encoder and pair-concentration layers."""
+
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,20 +9,7 @@ from dhg import Hypergraph
 
 
 class HGNNConv(nn.Module):
-    """
-    Hypergraph Neural Network Convolution Layer.
-
-    Implements hypergraph convolution without BatchNorm and Dropout
-    for stable meta-learning.
-
-    Args:
-        in_channels: Input feature dimension
-        out_channels: Output feature dimension
-        bias: Whether to use bias in linear transformation
-        use_bn: Kept for API compatibility (unused)
-        drop_rate: Kept for API compatibility (unused)
-        is_last: Whether this is the last layer (no activation)
-    """
+    """A lightweight HGNN convolution used by the published model."""
 
     def __init__(
         self,
@@ -35,83 +23,49 @@ class HGNNConv(nn.Module):
         super().__init__()
         self.is_last = is_last
         self.theta = nn.Linear(in_channels, out_channels, bias=bias)
-        self.act = nn.ReLU(inplace=True)
+        self.act = nn.ReLU(inplace=False)
 
     def forward(self, X: torch.Tensor, hg: Hypergraph) -> torch.Tensor:
-        """
-        Forward pass.
-
-        Args:
-            X: Node features [N, in_channels]
-            hg: Hypergraph structure
-
-        Returns:
-            Output features [N, out_channels]
-        """
         X = self.theta(X)
         X = hg.smoothing_with_HGNN(X)
-        if not self.is_last:
-            X = self.act(X)
-        return X
+        return X if self.is_last else self.act(X)
 
     def functional_forward(
         self, X: torch.Tensor, hg: Hypergraph, params: dict
     ) -> torch.Tensor:
-        """
-        Functional forward for MAML (supports custom parameters).
-
-        Args:
-            X: Node features
-            hg: Hypergraph structure
-            params: Dictionary of parameters {'theta.weight', 'theta.bias'}
-
-        Returns:
-            Output features
-        """
-        W = params["theta.weight"]
-        b = params.get("theta.bias", None)
-        X = F.linear(X, W, b)
+        X = F.linear(X, params["theta.weight"], params.get("theta.bias"))
         X = hg.smoothing_with_HGNN(X)
-        if not self.is_last:
-            X = F.relu(X, inplace=True)
-        return X
+        return X if self.is_last else F.relu(X, inplace=False)
 
 
 class Concentration(nn.Module):
-    """
-    Concentration layer for aggregating hyperedge information.
+    """Construct pair features from node representations.
 
-    Aggregates node embeddings into hyperedge representations and
-    then concentrates them for final prediction.
+    For a pair ``(i, j)``, the representation is
+    ``[z_i, z_j, |z_i-z_j|, z_i*z_j]``.
     """
 
-    def __init__(self, in_channels: int, out_channels: int):
+    def __init__(self, hidden_channels: int, hidden_size: int):
         super().__init__()
-        self.theta = nn.Linear(in_channels, out_channels)
 
-    def forward(self, X: torch.Tensor, hg: Hypergraph) -> torch.Tensor:
-        """
-        Forward pass.
+    @staticmethod
+    def _pair_tensor(X: torch.Tensor, GP_info) -> torch.Tensor:
+        pairs = torch.as_tensor(GP_info, device=X.device, dtype=torch.long)
+        if pairs.ndim != 2 or pairs.shape[1] != 2:
+            raise ValueError(
+                f"Expected pair indices with shape [n, 2], got {tuple(pairs.shape)}."
+            )
+        if pairs.numel() and (
+            int(pairs.min()) < 0 or int(pairs.max()) >= X.shape[0]
+        ):
+            raise IndexError("Pair index is outside the feature matrix.")
 
-        Args:
-            X: Node features [N, in_channels]
-            hg: Hypergraph structure
+        z1 = X.index_select(0, pairs[:, 0])
+        z2 = X.index_select(0, pairs[:, 1])
+        return torch.cat((z1, z2, torch.abs(z1 - z2), z1 * z2), dim=1)
 
-        Returns:
-            Concentrated features
-        """
-        # Aggregate node features to hyperedges
-        edge_features = self.theta(X)
-        # Apply hypergraph smoothing
-        X = hg.smoothing_with_HGNN(edge_features)
-        return X
+    def forward(self, X: torch.Tensor, GP_info) -> torch.Tensor:
+        return self._pair_tensor(X, GP_info)
 
-    def functional_forward(
-        self, X: torch.Tensor, hg: Hypergraph, params: dict
-    ) -> torch.Tensor:
-        """Functional forward for MAML."""
-        W = params["theta.weight"]
-        b = params.get("theta.bias", None)
-        edge_features = F.linear(X, W, b)
-        X = hg.smoothing_with_HGNN(edge_features)
-        return X
+    def functional_forward(self, X: torch.Tensor, GP_info) -> torch.Tensor:
+        return self._pair_tensor(X, GP_info)

@@ -1,220 +1,197 @@
-"""
-Model-Agnostic Meta-Learning (MAML) implementation for HyperGraph PPI prediction.
-"""
+"""MAML-style training and evaluation for MHGNano."""
+
+from __future__ import annotations
+
 from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from dhg import Hypergraph
-from sklearn.metrics import (
-    average_precision_score,
-    confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
-from tqdm import tqdm
 
 from .hypergraph import HyperGraphMetaNetwork
+from utils.metrics import evaluate_metrics
 
 
 class MetaLearner(nn.Module):
-    """
-    MAML-based meta-learner for cross-species PPI prediction.
+    """Meta-learner with classifier-only target adaptation.
 
-    Implements the MAML algorithm with inner loop adaptation
-    and outer loop meta-optimization.
-
-    Args:
-        base_model: The base HyperGraphMetaNetwork model
-        inner_lr: Learning rate for inner loop adaptation
-        inner_steps: Number of gradient steps in inner loop
-        meta_lr: Learning rate for meta-optimizer
+    The protein encoder and hypergraph layers remain fixed during the inner
+    loop; the pair classifier is adapted from the meta-learned initialization.
     """
 
     def __init__(
         self,
         base_model: HyperGraphMetaNetwork,
-        inner_lr: float = 1e-2,
+        inner_lr: float = 1e-3,
         inner_steps: int = 5,
         meta_lr: float = 1e-4,
+        loss_type: str = "bce",
     ):
         super().__init__()
+        if loss_type not in {"bce", "weighted_bce"}:
+            raise ValueError("loss_type must be 'bce' or 'weighted_bce'.")
         self.model = base_model
-        self.inner_lr = inner_lr
-        self.inner_steps = inner_steps
+        self.inner_lr = float(inner_lr)
+        self.inner_steps = int(inner_steps)
+        self.loss_type = loss_type
         self.meta_optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=meta_lr
+            self.model.parameters(), lr=float(meta_lr)
         )
-        self.criterion = nn.BCEWithLogitsLoss()
+
+    def _loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        logits = logits.reshape(-1)
+        labels = labels.float().reshape(-1)
+        pos_weight = None
+        if self.loss_type == "weighted_bce":
+            positives = labels.sum().clamp_min(1.0)
+            negatives = (labels.numel() - labels.sum()).clamp_min(1.0)
+            pos_weight = negatives / positives
+        return F.binary_cross_entropy_with_logits(
+            logits, labels, pos_weight=pos_weight
+        )
 
     @staticmethod
-    def _clone_named_params(model: nn.Module) -> Dict[str, torch.Tensor]:
-        """Clone model parameters for inner loop adaptation."""
+    def _adaptable(name: str) -> bool:
+        return name.startswith("classifier.")
+
+    def _fast_params(self) -> Dict[str, torch.Tensor]:
         return {
-            name: p.clone()
-            for name, p in model.named_parameters()
-            if p.requires_grad
+            name: parameter
+            for name, parameter in self.model.named_parameters()
+            if parameter.requires_grad
         }
 
     def _inner_loop(
         self,
-        support_batch: Tuple[torch.Tensor, Hypergraph, torch.Tensor, torch.Tensor],
+        support_batch: Tuple[torch.Tensor, Hypergraph, object, object],
         device: torch.device,
     ) -> Dict[str, torch.Tensor]:
-        """
-        Perform inner loop adaptation on support set.
-
-        Args:
-            support_batch: (X_s, hg_s, index_s, index_label)
-            device: Computation device
-
-        Returns:
-            Adapted parameters (fast_params)
-        """
-        X_s, hg_s, index_s, index_label = support_batch
+        X_s, hg_s, pair_s, labels_s = support_batch
         X_s = X_s.to(device)
-        index_label = torch.tensor(index_label).to(device)
-        if hasattr(hg_s, "to"):
-            hg_s = hg_s.to(device)
+        labels_s = torch.as_tensor(labels_s, device=device, dtype=torch.float32)
+        hg_s = hg_s.to(device) if hasattr(hg_s, "to") else hg_s
+        fast_params = self._fast_params()
 
-        fast_params = self._clone_named_params(self.model)
-
-        for _ in tqdm(range(self.inner_steps), desc="Inner loop"):
-            logits = self.model.functional_forward(X_s, hg_s, index_s, params=fast_params)
-            loss = self.criterion(logits.view_as(index_label), index_label)
-
-            grads = torch.autograd.grad(
-                loss, fast_params.values(),
-                create_graph=False, retain_graph=False, allow_unused=True
+        for _ in range(self.inner_steps):
+            logits = self.model.functional_forward(
+                X_s, hg_s, pair_s, params=fast_params
             )
-            grads = [
-                torch.zeros_like(p) if g is None else g
-                for p, g in zip(fast_params.values(), grads)
-            ]
-
-            # Update fast parameters
-            fast_params = {
-                name: param - self.inner_lr * g
-                for (name, param), g in zip(fast_params.items(), grads)
-            }
-
+            loss = self._loss(logits, labels_s)
+            grads = torch.autograd.grad(
+                loss,
+                tuple(fast_params.values()),
+                create_graph=False,
+                allow_unused=True,
+            )
+            updated = {}
+            for (name, parameter), gradient in zip(fast_params.items(), grads):
+                if gradient is not None and self._adaptable(name):
+                    updated[name] = parameter - self.inner_lr * gradient
+                else:
+                    updated[name] = parameter
+            fast_params = updated
         return fast_params
+
+    def _query_logits(
+        self,
+        task: Dict[str, Tuple],
+        device: torch.device,
+        adapt: bool,
+    ):
+        if adapt and self.inner_steps > 0:
+            with torch.enable_grad():
+                fast_params = self._inner_loop(task["support"], device)
+        else:
+            fast_params = None
+
+        X_q, hg_q, pair_q, labels_q = task["query"]
+        X_q = X_q.to(device)
+        hg_q = hg_q.to(device) if hasattr(hg_q, "to") else hg_q
+        labels_q = torch.as_tensor(labels_q, device=device, dtype=torch.float32)
+        logits = self.model.functional_forward(
+            X_q, hg_q, pair_q, params=fast_params
+        )
+        return logits.reshape(-1), labels_q
 
     def meta_train_step(
         self,
         task_batch: List[Dict[str, Tuple]],
         device: torch.device,
-    ) -> Tuple[Dict[str, float], List[float]]:
-        """
-        Perform one meta-training step.
-
-        Args:
-            task_batch: List of tasks, each with 'support' and 'query'
-            device: Computation device
-
-        Returns:
-            metrics: Dictionary of meta-learning metrics
-            before_loss: List of losses before adaptation
-        """
+        threshold: float = 0.5,
+    ) -> Dict[str, float]:
         self.model.train()
-        meta_loss = 0.0
-        meta_acc = 0.0
-        meta_auroc = 0.0
-        meta_aucpr = 0.0
-        n_tasks = len(task_batch)
-
         self.meta_optimizer.zero_grad()
-        before_loss = []
+        query_losses = []
+        metric_rows = []
 
-        for task in tqdm(task_batch, desc="Processing tasks"):
-            X_q, hg_q, index_q, index_label = task["query"]
-            X_q = X_q.to(device)
-            if hasattr(hg_q, "to"):
-                hg_q = hg_q.to(device)
-            index_label = torch.tensor(index_label).to(device)
+        for task in task_batch:
+            logits, labels = self._query_logits(task, device, adapt=True)
+            query_losses.append(self._loss(logits, labels))
+            with torch.no_grad():
+                metric_rows.append(
+                    evaluate_metrics(
+                        labels.cpu().numpy(),
+                        torch.sigmoid(logits).cpu().numpy(),
+                        threshold=threshold,
+                    )
+                )
 
-            # Loss before adaptation
-            logits_q = self.model.functional_forward(X_q, hg_q, index_q, params=None)
-            loss_q_before = self.criterion(logits_q.view_as(index_label), index_label)
-
-            # Inner loop adaptation
-            fast_params = self._inner_loop(task["support"], device)
-
-            # Loss after adaptation
-            logits_q = self.model.functional_forward(X_q, hg_q, index_q, params=fast_params)
-            loss_q = self.criterion(logits_q.view_as(index_label), index_label)
-
-            meta_loss += loss_q
-            before_loss.append(loss_q_before.item())
-
-            # Metrics
-            preds = (torch.sigmoid(logits_q) > 0.5).float()
-            acc = (preds.view_as(index_label) == index_label).float().mean()
-            auc_roc = roc_auc_score(
-                index_label.cpu(),
-                preds.view_as(index_label).detach().cpu().numpy(),
-            )
-            auc_pr = average_precision_score(
-                index_label.cpu(),
-                preds.view_as(index_label).detach().cpu().numpy(),
-            )
-
-            meta_aucpr += auc_pr
-            meta_auroc += auc_roc
-            meta_acc += acc.item()
-
-        meta_loss = meta_loss / n_tasks
+        meta_loss = torch.stack(query_losses).mean()
         meta_loss.backward()
         self.meta_optimizer.step()
 
+        def mean_metric(key: str) -> float:
+            return float(sum(row[key] for row in metric_rows) / len(metric_rows))
+
         return {
-            "meta_loss": meta_loss.item(),
-            "meta_acc": meta_acc / n_tasks,
-            "meta_auroc": meta_auroc / n_tasks,
-            "meta_aucpr": meta_aucpr / n_tasks,
-        }, before_loss
+            "meta_loss": float(meta_loss.item()),
+            "meta_acc": mean_metric("accuracy"),
+            "meta_precision": mean_metric("precision"),
+            "meta_recall": mean_metric("recall"),
+            "meta_f1": mean_metric("f1"),
+            "meta_auroc": mean_metric("auroc"),
+            "meta_aucpr": mean_metric("auprc"),
+            "threshold": float(threshold),
+        }
 
     def meta_evaluate(
         self,
         task_batch: List[Dict[str, Tuple]],
         device: torch.device,
+        threshold: float = 0.5,
+        adapt: bool = True,
     ) -> Dict[str, float]:
-        """
-        Evaluate on meta-test tasks.
-
-        Args:
-            task_batch: List of test tasks
-            device: Computation device
-
-        Returns:
-            Dictionary of evaluation metrics
-        """
-        self.model.train()  # Keep in train mode for adaptation
-        total_loss, total_acc = 0.0, 0.0
-
+        """Evaluate each task on its query split, optionally using support."""
+        self.model.train() if adapt else self.model.eval()
+        rows = []
+        losses = []
         for task in task_batch:
-            X_q, hg_q, index_q, index_label = task["query"]
-            X_q = X_q.to(device)
-            if hasattr(hg_q, "to"):
-                hg_q = hg_q.to(device)
-            index_label = torch.tensor(index_label).to(device)
+            if adapt:
+                logits, labels = self._query_logits(task, device, adapt=True)
+            else:
+                with torch.no_grad():
+                    logits, labels = self._query_logits(task, device, adapt=False)
+            losses.append(float(self._loss(logits, labels).item()))
+            with torch.no_grad():
+                rows.append(
+                    evaluate_metrics(
+                        labels.cpu().numpy(),
+                        torch.sigmoid(logits).cpu().numpy(),
+                        threshold=threshold,
+                    )
+                )
 
-            # Evaluate before and after adaptation
-            logits_q = self.model.functional_forward(X_q, hg_q, index_q, params=None)
-            loss_q = self.criterion(logits_q.view_as(index_label), index_label)
-            preds = (torch.sigmoid(logits_q) > 0.5).float()
-
-            # Adapt and re-evaluate
-            fast_params = self._inner_loop(task["support"], device)
-            logits_q = self.model.functional_forward(X_q, hg_q, index_q, params=fast_params)
-            loss_q = self.criterion(logits_q.view_as(index_label), index_label)
-            preds = (torch.sigmoid(logits_q) > 0.5).float()
-            acc = (preds.view_as(index_label) == index_label).float().mean()
-
-            total_loss += loss_q.item()
-            total_acc += acc.item()
-
-        n = len(task_batch)
-        return {"loss": total_loss / n, "acc": total_acc / n}
+        if not rows:
+            raise ValueError("No evaluation tasks were provided.")
+        return {
+            "loss": float(sum(losses) / len(losses)),
+            "accuracy": float(sum(row["accuracy"] for row in rows) / len(rows)),
+            "precision": float(sum(row["precision"] for row in rows) / len(rows)),
+            "recall": float(sum(row["recall"] for row in rows) / len(rows)),
+            "f1": float(sum(row["f1"] for row in rows) / len(rows)),
+            "auroc": float(sum(row["auroc"] for row in rows) / len(rows)),
+            "auprc": float(sum(row["auprc"] for row in rows) / len(rows)),
+            "threshold": float(threshold),
+            "adapt": bool(adapt),
+        }

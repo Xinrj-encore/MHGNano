@@ -31,10 +31,10 @@ def test_hypergraph_meta_network():
 
     X = torch.randn(100, 320)
     hg = Hypergraph(100, [[0, 1, 2], [3, 4, 5]])
-    GP_info = torch.randint(0, 10, (100,))
+    GP_info = torch.tensor([[0, 1], [3, 4], [1, 2]])
 
     out = model(X, hg, GP_info)
-    assert out.shape == (100, 1)
+    assert out.shape == (3, 1)
 
 
 def test_meta_learner():

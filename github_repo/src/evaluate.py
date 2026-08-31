@@ -1,73 +1,96 @@
-"""
-Evaluation script for HyperGraph Meta-Learning.
-"""
+"""Evaluate a checkpoint on held-out species using the fixed cutoff protocol."""
+
+from __future__ import annotations
+
 import argparse
+import json
+from pathlib import Path
 
 import torch
 
+from data import load_species_data
 from models import HyperGraphMetaNetwork, MetaLearner
-from data import load_species_data, sample_meta_batch
+from train import build_evaluation_tasks, set_seed
 from utils import print_metrics
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Evaluate HyperGraph Meta-Learning model")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
-    parser.add_argument("--data_root", type=str, default="./data/yuanhe")
-    parser.add_argument("--model_size", type=str, default="8M", choices=["8M", "35M", "150M"])
-    parser.add_argument("--species", type=str, nargs="+", default=["208964"])
-    parser.add_argument("--in_channels", type=int, default=320)
-    parser.add_argument("--hid_channels", type=int, default=256)
-    parser.add_argument("--num_classes", type=int, default=128)
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--data_root", default="./data/yuanhe")
+    parser.add_argument(
+        "--model_size", default="8M", choices=["8M", "35M", "150M", "650M"]
+    )
+    parser.add_argument("--species", nargs="+", required=True)
+    parser.add_argument("--fold", type=int, default=0)
+    parser.add_argument("--in_channels", type=int)
     parser.add_argument("--inner_lr", type=float, default=1e-3)
     parser.add_argument("--inner_steps", type=int, default=5)
     parser.add_argument("--meta_lr", type=float, default=1e-4)
-    parser.add_argument("--meta_batch_size", type=int, default=3)
-
+    parser.add_argument(
+        "--loss_type", choices=["bce", "weighted_bce"], default="bce"
+    )
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no_adapt", action="store_true")
+    parser.add_argument("--output")
     args = parser.parse_args()
 
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    # Load model
-    print(f"Loading checkpoint from {args.checkpoint}...")
+    species_data = {
+        species_id: load_species_data(
+            species_id,
+            args.data_root,
+            args.model_size,
+            fold=args.fold,
+        )
+        for species_id in args.species
+    }
+    feature_widths = {features.shape[1] for features, _, _ in species_data.values()}
+    if len(feature_widths) != 1:
+        raise ValueError(
+            f"Evaluation species have inconsistent feature widths: {sorted(feature_widths)}."
+        )
+    inferred_in_channels = feature_widths.pop()
+    if args.in_channels is not None and args.in_channels != inferred_in_channels:
+        raise ValueError(
+            f"--in_channels={args.in_channels} does not match the loaded feature "
+            f"width ({inferred_in_channels})."
+        )
     checkpoint = torch.load(args.checkpoint, map_location=device)
-
-    # Create model
-    num_hyperedges = 10000  # Will be updated
-    base = HyperGraphMetaNetwork(
-        in_channels=args.in_channels,
-        hid_channels=args.hid_channels,
-        num_classes=args.num_classes,
-        num_hyperedges=num_hyperedges,
-    ).to(device)
-
-    base.load_state_dict(checkpoint["model_state_dict"])
-
+    model = HyperGraphMetaNetwork(in_channels=inferred_in_channels).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
     meta = MetaLearner(
-        base_model=base,
+        model,
         inner_lr=args.inner_lr,
         inner_steps=args.inner_steps,
         meta_lr=args.meta_lr,
+        loss_type=args.loss_type,
     )
-
-    # Load test species data
-    species_data = {}
-    for sp in args.species:
-        print(f"Loading {sp}...")
-        X, hg, y = load_species_data(sp, args.data_root, args.model_size, device=None)
-        species_data[sp] = (X, hg, y)
-
-    # Build tasks
-    from train import build_tasks_from_species_list
-    tasks = build_tasks_from_species_list(species_data, args.species)
-    batch = sample_meta_batch(tasks, args.meta_batch_size)
-
-    # Evaluate
-    print("\n===== Evaluation =====")
-    metrics = meta.meta_evaluate(batch, device)
-    print(f"Loss: {metrics['loss']:.4f}")
-    print(f"Accuracy: {metrics['acc']:.4f}")
+    tasks = build_evaluation_tasks(
+        species_data, args.species, adapt=not args.no_adapt
+    )
+    metrics = meta.meta_evaluate(
+        tasks,
+        device,
+        threshold=args.threshold,
+        adapt=not args.no_adapt,
+    )
+    print_metrics(metrics, prefix="Evaluation")
+    payload = {
+        "checkpoint": str(Path(args.checkpoint).resolve()),
+        "species": args.species,
+        "fold": args.fold,
+        "seed": args.seed,
+        "adapt": not args.no_adapt,
+        "threshold": args.threshold,
+        "metrics": metrics,
+    }
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -1,154 +1,145 @@
-# HyperGraph Meta-Learning for Protein-Protein Interaction Prediction
+# MHGNano
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-1.10+-ee4c2c.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+MHGNano is a hypergraph meta-learning implementation for cross-species
+protein-protein interaction (PPI) prediction and few-shot transfer to
+nanobody-antigen interaction (NAI) prediction.
 
-This repository contains the implementation of **HyperGraph Meta-Learning Network** for cross-species Protein-Protein Interaction (PPI) prediction using Model-Agnostic Meta-Learning (MAML) and Hypergraph Neural Networks.
+This revision accompanies the August 2026 reviewer-response package. It
+includes the corrected train/validation/test protocol, a fixed-cutoff
+evaluation implementation, and the compact seed-level evidence needed to
+inspect the added analyses.
 
-## Overview
+## What Is Implemented
 
-Protein-protein interactions are fundamental to biological processes. This project addresses the challenge of predicting PPIs in species with limited labeled data by leveraging meta-learning across multiple source species. The model uses:
-
-- **Hypergraph Neural Networks (HGNN)** to model complex protein relationships
-- **Model-Agnostic Meta-Learning (MAML)** for fast adaptation to new species
-- **Cross-species transfer learning** to handle data scarcity
-
-## Key Features
-
-- Meta-learning framework for cross-species PPI prediction
-- Hypergraph-based protein interaction modeling
-- Support for multiple species adaptation
-- No BatchNorm/Dropout variants for stable meta-learning
-- Comprehensive evaluation metrics (AUC-ROC, AUC-PR, F1, etc.)
+- Frozen ESM-2 protein features.
+- Maximal-clique-derived hyperedges from positive PPI graphs.
+- A two-layer HGNN encoder and pairwise classifier.
+- MAML-style classifier adaptation from a meta-learned initialization.
+- Held-out evaluation with target `train` support and target `test` query.
+- Fixed `0.5` probability cutoff for Accuracy, Precision, Recall, and F1.
+  AUROC and AUPRC use continuous prediction probabilities.
 
 ## Installation
 
-### Requirements
-
-- Python 3.8+
-- PyTorch 1.12.1
-- CUDA
-
-### Setup
-
 ```bash
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+git clone https://github.com/Xinrj-encore/MHGNano.git
+cd MHGNano
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-## Quick Start
+Choose a PyTorch build appropriate for the local CUDA driver before installing
+the remaining requirements when GPU execution is required.
 
-### 1. Data Preparation
+## Processed Data Layout
 
-Organize your data in the following structure:
-```
+Raw STRING, sequence, and NAI data are not redistributed. The training scripts
+expect precomputed artifacts in this layout:
+
+```text
 data/
-├── yuanhe/
-│   ├── species_1/
-│   │   ├── PPI_cliques_Hyperedge_species_1_8M.pkl
-│   │   └── protein_feature_CT_species_1_8M.pt
-│   └── species_2/
-│       └── ...
-└── zhenhe/
-    └── ...
+└── <collection>/
+    └── <species_id>/
+        ├── PPI_cliques_Hyperedge_<species_id>_<model_size>.pkl
+        ├── protein_feature_CT_<species_id>_<model_size>.pt
+        ├── train_idx_<species_id>.pkl
+        ├── val_idx_<species_id>.pkl
+        └── test_idx_<species_id>.pkl
 ```
 
-### 2. Training
+Each index file is a list of folds. A fold stores `[pairs, labels]`, where a
+pair is `[protein_i, protein_j]`. `--fold 0` selects the first fold.
+
+For the manuscript preprocessing, sequences were restricted to 51--800 amino
+acids; STRING confidence greater than 500 defined positive PPI edges; and
+candidate negatives were restricted to the positive-induced protein universe.
+Maximal cliques were enumerated from the undirected positive PPI graph with
+NetworkX 3.6.1.
+
+## Train
+
+The final species passed to `--species` is held out. During meta-training,
+source-species training pairs are support and source-species validation pairs
+are query. Test pairs are never appended to validation pairs.
 
 ```bash
-# Train on Yuanhe dataset
-python -m src.train --dataset yuanhe --epochs 20000 --inner_steps 5
-
-# Train on Zhenhe dataset
-python -m src.train --dataset zhenhe --epochs 20000 --inner_lr 1e-3
+python src/train.py \
+  --data_root ./data/yuanhe \
+  --species 1326 41514 77635 208964 \
+  --model_size 8M \
+  --fold 0 \
+  --seed 42 \
+  --out_dir ./output/yuanhe_seed42
 ```
 
-### 3. Evaluation
+The default model size is `8M`; `35M`, `150M`, and `650M` are also accepted
+when matching feature and hypergraph artifacts are available. The input width
+is inferred from the feature tensor, so it is not fixed to the 320 dimensions
+used by ESM-2 8M.
+
+## Evaluate
+
+Few-shot evaluation adapts only the classifier on the held-out species training
+split, then evaluates once on its test split:
 
 ```bash
-python -m src.evaluate --checkpoint output/best_model.pt --dataset yuanhe
+python src/evaluate.py \
+  --checkpoint ./output/yuanhe_seed42/best_model.pt \
+  --data_root ./data/yuanhe \
+  --species 208964 \
+  --fold 0 \
+  --threshold 0.5 \
+  --output ./output/yuanhe_seed42/test_metrics.json
 ```
 
-## Project Structure
+Use `--no_adapt` for an explicit no-target-adaptation evaluation. The command
+always reports Accuracy, Precision, Recall, F1, AUROC, and AUPRC.
 
-```
-.
-├── src/                    # Source code
-│   ├── models/            # Model architectures
-│   │   ├── hypergraph.py  # HyperGraphMetaNetwork
-│   │   ├── layers.py      # HGNNConv, Concentration
-│   │   └── meta.py        # MetaLearner (MAML)
-│   ├── data/              # Data loading and processing
-│   │   └── dataset.py     # Dataset utilities
-│   ├── utils/             # Helper functions
-│   │   ├── metrics.py     # Evaluation metrics
-│   │   └── checkpoint.py  # Model saving/loading
-│   ├── train.py           # Training script
-│   └── evaluate.py        # Evaluation script
-├── configs/               # Configuration files
-├── examples/              # Example scripts
-├── tests/                 # Unit tests
-├── requirements.txt       # Python dependencies
-├── setup.py              # Package setup
-└── README.md             # This file
+For one checkpoint per seed, preserve seed-level results rather than reporting
+only an aggregate:
+
+```bash
+python src/evaluate_with_stats.py \
+  --checkpoint_template './output/yuanhe_seed{seed}/best_model.pt' \
+  --data_root ./data/yuanhe \
+  --species 208964 \
+  --seeds 42 123 456 789 2023 \
+  --threshold 0.5 \
+  --output ./results/yuanhe_seed_level.json
 ```
 
-## Model Architecture
+## Reviewer-Relevant Evidence
 
-### HyperGraphMetaNetwork
+The `reproduction/` directory contains compact, versioned evidence used by the
+revision:
 
-The core model consists of:
+- `protocol_audit/`: cutoff protocol, split-audit method, and documented
+  historical versus strict pair-disjoint controls.
+- `class_imbalance/`: five-seed 1:1, 1:3, 1:5, and reference 1:9 results.
+- `baseline_comparison/`: 30-seed direct TRGH-PPI/HIGH-PPI results and the
+  independent-comparison statistics against MHGNano-few.
+- `esm2_scale/`: 30 matched-seed ESM-2 scale results and corrected tests.
 
-1. **HGNN Encoder**: Two-layer hypergraph convolutional network
-   - Input: Protein features (320-dim ESM embeddings)
-   - Hidden: 256-dim hypergraph representation
-   - Output: 128-dim protein embeddings
+Read [REPRODUCTION.md](REPRODUCTION.md) before interpreting a comparison.
+It records which analyses use matched paired seeds and which use independent
+tests, and it distinguishes the historical split files from the strict
+pair-disjoint control.
 
-2. **Concentration Layer**: Aggregates hyperedge information
+The GO-enrichment and same-size random-control workflow used to assess the
+biological coherence of clique-derived hyperedges is implemented in
+`scripts/validate_cliques_biological.py`. It accepts a clique pickle, protein
+identifier mapping, and GO annotation file; those source databases are not
+redistributed.
 
-3. **Classifier**: 3-layer MLP (512 → 1024 → 256 → 1)
+## Scope
 
-### Meta-Learning (MAML)
+The numerical evidence is specific to the listed datasets, splits, feature
+artifacts, and evaluation protocols. It is not a claim of universal superiority
+over all PPI methods or all biological settings.
 
-- **Inner Loop**: Task-specific adaptation with gradient descent
-- **Outer Loop**: Meta-parameter optimization across tasks
-- **Support/Query Split**: Few-shot learning setup
+## License
 
-## Datasets
-
-### Supported Datasets
-
-- **Yuanhe**: 4 species (1326, 41514, 77635, 208964)
-- **Zhenhe**: Multiple species with varying sizes
-- **Nano**: Small-scale species for few-shot testing
-
-### Data Format
-
-- **Hypergraph**: Pickled hyperedge lists (`PPI_cliques_Hyperedge_*.pkl`)
-- **Features**: PyTorch tensors (`protein_feature_CT_*.pt`)
-- **Labels**: Train/val/test indices in pickle format
-
-## Training Configuration
-
-### Key Hyperparameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `inner_lr` | 1e-3 | Inner loop learning rate |
-| `inner_steps` | 5 | Number of inner loop updates |
-| `meta_lr` | 1e-4 | Meta learning rate |
-| `meta_batch_size` | 3 | Number of tasks per meta-batch |
-| `n_support` | 64 | Support set size |
-| `n_query` | 64 | Query set size |
-
-### Example Configurations
-
-See `configs/` directory for dataset-specific configurations.
-
-```
+This repository is released under the MIT License. Please cite the MHGNano
+manuscript and the original data and baseline sources when using this code.

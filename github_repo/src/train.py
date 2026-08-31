@@ -1,172 +1,189 @@
-"""
-Training script for HyperGraph Meta-Learning.
-"""
+"""Train MHGNano with species-level meta-learning tasks."""
+
+from __future__ import annotations
+
 import argparse
+import json
 import random
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import numpy as np
 import torch
-from dhg import Hypergraph
 from tqdm import tqdm
 
-from models import HyperGraphMetaNetwork, MetaLearner
 from data import load_species_data, sample_meta_batch
+from models import HyperGraphMetaNetwork, MetaLearner
 from utils import Checkpointer, EarlyStopping
 
 
-def build_tasks_from_species_list(
-    species_data: Dict[str, Tuple], splist: List[str]
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def build_meta_tasks(
+    species_data: Dict[str, Tuple], species: List[str]
 ) -> List[Dict[str, Tuple]]:
-    """Build meta-learning tasks from species list."""
+    """Use train as support and validation as query for meta-training."""
     tasks = []
-    for sp in splist:
-        X, hg, y = species_data[sp]
-        s_idx = y[0][0]
-        s_label = y[0][1]
-        q_idx = y[1][0]
-        q_label = y[1][1]
-        support = (X, hg, s_idx, s_label)
-        query = (X, hg, q_idx, q_label)
-        tasks.append({"support": support, "query": query})
+    for species_id in species:
+        features, hypergraph, splits = species_data[species_id]
+        tasks.append(
+            {
+                "support": (features, hypergraph, *splits["train"]),
+                "query": (features, hypergraph, *splits["val"]),
+            }
+        )
     return tasks
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Train HyperGraph Meta-Learning model"
+def build_evaluation_tasks(
+    species_data: Dict[str, Tuple],
+    species: List[str],
+    adapt: bool = True,
+) -> List[Dict[str, Tuple]]:
+    """Use target train as support and target test as query."""
+    tasks = []
+    for species_id in species:
+        features, hypergraph, splits = species_data[species_id]
+        support_split = splits["train"] if adapt else ([], [])
+        tasks.append(
+            {
+                "support": (features, hypergraph, *support_split),
+                "query": (features, hypergraph, *splits["test"]),
+            }
+        )
+    return tasks
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data_root", default="./data/yuanhe")
+    parser.add_argument(
+        "--model_size",
+        default="8M",
+        choices=["8M", "35M", "150M", "650M"],
     )
     parser.add_argument(
-        "--data_root", type=str, default="./data/yuanhe", help="Data root directory"
+        "--in_channels",
+        type=int,
+        help="Input feature dimension. Defaults to the loaded feature width.",
     )
-    parser.add_argument(
-        "--model_size", type=str, default="8M", choices=["8M", "35M", "150M"]
-    )
-    parser.add_argument("--in_channels", type=int, default=320)
     parser.add_argument("--hid_channels", type=int, default=256)
     parser.add_argument("--num_classes", type=int, default=128)
-
-    # MAML hyperparameters
     parser.add_argument("--inner_lr", type=float, default=1e-3)
     parser.add_argument("--inner_steps", type=int, default=5)
     parser.add_argument("--meta_lr", type=float, default=1e-4)
+    parser.add_argument(
+        "--loss_type", choices=["bce", "weighted_bce"], default="bce"
+    )
     parser.add_argument("--epochs", type=int, default=20000)
     parser.add_argument("--meta_batch_size", type=int, default=3)
-    parser.add_argument("--n_support", type=int, default=64)
-    parser.add_argument("--n_query", type=int, default=64)
-
-    # Training settings
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out_dir", type=str, default="./output")
-    parser.add_argument("--save_every", type=int, default=0)
-    parser.add_argument("--patience", type=int, default=5)
-    parser.add_argument("--resume", type=str, default=None)
-
-    # Species list
+    parser.add_argument("--fold", type=int, default=0)
     parser.add_argument(
         "--species",
-        type=str,
         nargs="+",
         default=["1326", "41514", "77635", "208964"],
-        help="List of species IDs",
     )
+    parser.add_argument("--out_dir", default="./output/yuanhe")
+    parser.add_argument("--save_every", type=int, default=0)
+    parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--resume")
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
-    # Set random seeds
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
-
-    # Device
+def main() -> None:
+    args = parse_args()
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    if len(args.species) < 2:
+        raise ValueError(
+            "Provide at least one training species and one held-out species."
+        )
 
-    # Split species
-    if len(args.species) > 1:
-        unseen_species = args.species[-1]
-        train_species = args.species[:-1]
-    else:
-        unseen_species = args.species[0]
-        train_species = args.species
+    train_species = args.species[:-1]
+    held_out_species = args.species[-1]
+    species_data = {
+        species_id: load_species_data(
+            species_id,
+            args.data_root,
+            args.model_size,
+            fold=args.fold,
+        )
+        for species_id in train_species
+    }
+    tasks = build_meta_tasks(species_data, train_species)
+    feature_widths = {features.shape[1] for features, _, _ in species_data.values()}
+    if len(feature_widths) != 1:
+        raise ValueError(
+            f"Training species have inconsistent feature widths: {sorted(feature_widths)}."
+        )
+    inferred_in_channels = feature_widths.pop()
+    if args.in_channels is not None and args.in_channels != inferred_in_channels:
+        raise ValueError(
+            f"--in_channels={args.in_channels} does not match the loaded feature "
+            f"width ({inferred_in_channels})."
+        )
+    args.in_channels = inferred_in_channels
 
-    print(f"Training species: {train_species}")
-    print(f"Unseen species: {unseen_species}")
-
-    # Load species data
-    num_hyperedges = 0
-    species_data = {}
-    for sp in train_species:
-        print(f"Loading {sp}...")
-        X, hg, y = load_species_data(sp, args.data_root, args.model_size, device=None)
-        species_data[sp] = (X, hg, y)
-        num_hyperedges = max(num_hyperedges, len(hg.e))
-
-    # Create model
-    base = HyperGraphMetaNetwork(
+    model = HyperGraphMetaNetwork(
         in_channels=args.in_channels,
         hid_channels=args.hid_channels,
         num_classes=args.num_classes,
-        num_hyperedges=num_hyperedges,
     ).to(device)
-
     meta = MetaLearner(
-        base_model=base,
+        model,
         inner_lr=args.inner_lr,
         inner_steps=args.inner_steps,
         meta_lr=args.meta_lr,
+        loss_type=args.loss_type,
     )
-
-    print(f"Model parameters: {sum(p.numel() for p in base.parameters()):,}")
-
-    # Checkpointer
-    checkpointer = Checkpointer(args.out_dir, save_every=args.save_every)
+    checkpointer = Checkpointer(args.out_dir, args.save_every)
+    early_stopping = EarlyStopping(args.patience, delta=1e-4)
     start_epoch = checkpointer.try_resume(meta, args.resume)
 
-    # Early stopping
-    early_stopping = EarlyStopping(patience=args.patience, delta=0.001)
+    output_dir = Path(args.out_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "config.json").write_text(
+        json.dumps(
+            {
+                **vars(args),
+                "device": str(device),
+                "train_species": train_species,
+                "held_out_species": held_out_species,
+                "adaptable_parameters": "classifier.*",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
-    # Training loop
-    print("\n===== Meta-Training =====")
-    loss_list = []
-
-    for epoch in tqdm(range(start_epoch, args.epochs + 1), desc="Training"):
-        tasks = build_tasks_from_species_list(species_data, train_species)
-
-        if len(tasks) == 0:
-            raise RuntimeError("No valid tasks constructed.")
-
+    for epoch in tqdm(range(start_epoch, args.epochs + 1), desc="meta-training"):
         batch = sample_meta_batch(tasks, args.meta_batch_size)
-        metrics, before_loss = meta.meta_train_step(batch, device)
-        loss_list.append(before_loss)
-
-        # Save checkpoints
+        metrics = meta.meta_train_step(batch, device, args.threshold)
         checkpointer.save_last(epoch, meta, metrics)
         checkpointer.save_periodic(epoch, meta, metrics)
-        is_best = checkpointer.save_if_best(epoch, meta, metrics, monitor="meta_aucpr")
+        is_best = checkpointer.save_if_best(epoch, meta, metrics)
 
-        # Early stopping check
-        if epoch % 20 == 0 and epoch > 1:
-            improved = early_stopping(
-                metrics["meta_aucpr"], loss_list[-2], before_loss
-            )
-            if not improved:
-                print(f"[Epoch {epoch}] No improvement (best={early_stopping.best_auc_pr:.4f})")
-            if early_stopping.early_stop:
-                print(f"Early stopping at epoch {epoch}")
-                break
-
-        # Print progress
-        if epoch % 10 == 0:
+        if epoch % 10 == 0 or is_best:
             print(
-                f"[Epoch {epoch:04d}] "
-                f"loss={metrics['meta_loss']:.4f} | "
-                f"acc={metrics['meta_acc']:.4f} | "
-                f"auroc={metrics['meta_auroc']:.4f} | "
-                f"aucpr={metrics['meta_aucpr']:.4f}"
-                f"{' *BEST*' if is_best else ''}"
+                f"[epoch {epoch:05d}] loss={metrics['meta_loss']:.4f} "
+                f"val_auprc={metrics['meta_aucpr']:.4f} "
+                f"val_f1={metrics['meta_f1']:.4f}"
+                f"{' *best*' if is_best else ''}"
             )
+        if epoch % 20 == 0 and early_stopping(metrics["meta_aucpr"]):
+            print(f"Early stopping at epoch {epoch}.")
+            break
 
-    print(f"\nTraining complete! Best model saved to {checkpointer.best_path_pt}")
+    print(f"Best checkpoint: {checkpointer.best_path_pt}")
 
 
 if __name__ == "__main__":

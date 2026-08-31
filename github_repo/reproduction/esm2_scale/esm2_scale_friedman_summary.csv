@@ -1,0 +1,7 @@
+Metric,Best mean model,Friedman q,Kendall W,Significance
+Precision,8M,5.54e-08,0.423,***
+Recall,35M,1.30e-04,0.232,***
+Acc,8M,1.66e-11,0.616,***
+F1,35M,1.30e-04,0.228,***
+AUROC,35M,6.44e-15,0.809,***
+AUPRC,35M,5.69e-08,0.415,***

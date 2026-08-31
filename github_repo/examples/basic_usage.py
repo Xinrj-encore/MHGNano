@@ -1,46 +1,21 @@
-# Example: Training on Yuanhe dataset
+"""Minimal example for loading a species task and building MHGNano."""
 
+from data import load_species_data
 from models import HyperGraphMetaNetwork, MetaLearner
-from data import load_species_data, sample_meta_batch
-from utils import Checkpointer, EarlyStopping
 
-import torch
-import random
 
-# Set seeds
-random.seed(42)
-torch.manual_seed(42)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Species list
-species_list = ["1326", "41514", "77635", "208964"]
-train_species = species_list[:-1]
-
-# Load data
-species_data = {}
-num_hyperedges = 0
-for sp in train_species:
-    X, hg, y = load_species_data(sp, "./data/yuanhe", "8M")
-    species_data[sp] = (X, hg, y)
-    num_hyperedges = max(num_hyperedges, len(hg.e))
-
-# Create model
-base = HyperGraphMetaNetwork(
-    in_channels=320,
-    hid_channels=256,
-    num_classes=128,
-    num_hyperedges=num_hyperedges,
-).to(device)
-
-meta = MetaLearner(
-    base_model=base,
-    inner_lr=1e-3,
-    inner_steps=5,
-    meta_lr=1e-4,
+features, hypergraph, splits = load_species_data(
+    "208964",
+    data_root="./data/yuanhe",
+    model_size_tag="8M",
+    fold=0,
 )
+model = HyperGraphMetaNetwork(in_channels=features.shape[1])
+meta = MetaLearner(model, inner_lr=1e-3, inner_steps=5, meta_lr=1e-4)
 
-print(f"Model has {sum(p.numel() for p in base.parameters()):,} parameters")
-
-# Training would continue here...
-# See src/train.py for complete training loop
+print(f"features: {tuple(features.shape)}")
+print(f"hypergraph vertices: {hypergraph.num_v}")
+print(f"train pairs: {len(splits['train'][0])}")
+print(f"validation pairs: {len(splits['val'][0])}")
+print(f"test pairs: {len(splits['test'][0])}")
+print(f"trainable parameters: {sum(p.numel() for p in model.parameters()):,}")
