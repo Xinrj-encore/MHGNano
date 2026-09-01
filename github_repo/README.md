@@ -1,5 +1,9 @@
 # MHGNano
 
+> The repository-root [`README.md`](../README.md) is the primary entry point
+> for installation, preprocessing, training, and reproduction. This file
+> provides the implementation-level details for the `github_repo/` directory.
+
 MHGNano is a hypergraph meta-learning implementation for cross-species
 protein-protein interaction (PPI) prediction and few-shot transfer to
 nanobody-antigen interaction (NAI) prediction.
