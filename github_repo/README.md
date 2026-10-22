@@ -1,29 +1,10 @@
 # MHGNano
 
-> The repository-root [`README.md`](../README.md) is the primary entry point
-> for installation, preprocessing, training, and reproduction. This file
-> provides the implementation-level details for the `github_repo/` directory.
+MHGNano is a hypergraph meta-learning framework for cross-species protein--protein interaction (PPI) prediction and few-shot transfer to nanobody--antigen interaction (NAI) prediction. This repository contains the model, data-preparation entry points, training/evaluation commands, and reviewer-requested reproducibility evidence.
 
-MHGNano is a hypergraph meta-learning implementation for cross-species
-protein-protein interaction (PPI) prediction and few-shot transfer to
-nanobody-antigen interaction (NAI) prediction.
+Raw STRING/NAI datasets, protein feature tensors, checkpoints, and private assay data are not redistributed. Obtain source data from their providers and follow their terms. The paper's listed split files were treated as fixed inputs; the generator below creates a new deterministic split and does not claim to recreate historical split files byte-for-byte.
 
-This revision accompanies the August 2026 reviewer-response package. It
-includes the corrected train/validation/test protocol, a fixed-cutoff
-evaluation implementation, and the compact seed-level evidence needed to
-inspect the added analyses.
-
-## What Is Implemented
-
-- Frozen ESM-2 protein features.
-- Maximal-clique-derived hyperedges from positive PPI graphs.
-- A two-layer HGNN encoder and pairwise classifier.
-- MAML-style classifier adaptation from a meta-learned initialization.
-- Held-out evaluation with target `train` support and target `test` query.
-- Fixed `0.5` probability cutoff for Accuracy, Precision, Recall, and F1.
-  AUROC and AUPRC use continuous prediction probabilities.
-
-## Installation
+## Install
 
 ```bash
 git clone https://github.com/Xinrj-encore/MHGNano.git
@@ -34,116 +15,83 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Choose a PyTorch build appropriate for the local CUDA driver before installing
-the remaining requirements when GPU execution is required.
+Run with Python 3.10 or newer. Choose a PyTorch build compatible with the local CUDA driver when using a GPU. The code was developed with DHG 0.9.5 and NetworkX 3.6.1.
 
-## Processed Data Layout
+## Prepare PPI Data
 
-Raw STRING, sequence, and NAI data are not redistributed. The training scripts
-expect precomputed artifacts in this layout:
+Download the STRING protein links file and matching protein FASTA for each organism. The script applies the manuscript sequence-length filter (51--800 aa), treats scores `>500` as positive and scores `<=500` as candidate negatives, retains up to 10,000 positives and up to nine candidate negatives per positive, and restricts candidate negatives to proteins in the positive-pair universe. It canonicalizes undirected pairs, removes duplicate pairs, and records input checksums and split counts in a manifest.
 
-```text
-data/
-└── <collection>/
-    └── <species_id>/
-        ├── PPI_cliques_Hyperedge_<species_id>_<model_size>.pkl
-        ├── protein_feature_CT_<species_id>_<model_size>.pt
-        ├── train_idx_<species_id>.pkl
-        ├── val_idx_<species_id>.pkl
-        └── test_idx_<species_id>.pkl
+```bash
+python -m scripts.prepare_ppi_dataset \
+  --links ./raw/9606.protein.links.v12.0.txt \
+  --fasta ./raw/9606.protein.sequences.v12.0.fa \
+  --species 9606 \
+  --output-root ./data/yuanhe \
+  --positive-cap 10000 \
+  --negative-ratio 9 \
+  --folds 5 \
+  --validation-fraction 0.2 \
+  --split-seed 42
 ```
 
-Each index file is a list of folds. A fold stores `[pairs, labels]`, where a
-pair is `[protein_i, protein_j]`. `--fold 0` selects the first fold.
+This creates `data/yuanhe/9606/` containing the positive graph, maximal-clique hyperedges, five train/validation/test folds, protein ID mapping, and `preprocessing_manifest.json`. Output creation is exclusive: rerunning to an existing species directory stops instead of overwriting it.
 
-For the manuscript preprocessing, sequences were restricted to 51--800 amino
-acids; STRING confidence greater than 500 defined positive PPI edges; and
-candidate negatives were restricted to the positive-induced protein universe.
-Maximal cliques were enumerated from the undirected positive PPI graph with
-NetworkX 3.6.1.
+Within each fold, the splitter keeps each canonical undirected pair in exactly one of train, validation, or test, and approximately stratifies labels. It uses a deterministic stratified five-fold assignment, then samples validation from the remaining training portion. This is a clean regeneration workflow, not a replacement for the fixed split artifacts used to produce the manuscript tables.
 
-## Train
+## Extract Frozen ESM-2 Features
 
-The final species passed to `--species` is held out. During meta-training,
-source-species training pairs are support and source-species validation pairs
-are query. Test pairs are never appended to validation pairs.
+Feature extraction reads `Protein_list.csv` and emits rows in its integer ID order. The default uses `facebook/esm2_t6_8M_UR50D`, no special tokens, truncation at 800 residues, and attention-mask mean pooling.
+
+```bash
+python -m scripts.extract_esm2_features \
+  --fasta ./raw/9606.protein.sequences.v12.0.fa \
+  --species-dir ./data/yuanhe/9606 \
+  --species 9606 \
+  --model-name facebook/esm2_t6_8M_UR50D \
+  --model-tag 8M \
+  --batch-size 4
+```
+
+The first run downloads the model from Hugging Face unless it is already cached. The feature file is written as `protein_feature_CT_9606_8M.pt`; existing outputs are not overwritten.
+
+## Train and Evaluate
+
+The last species listed is held out. Source `train` pairs are support and source `val` pairs are query during meta-training. Few-shot evaluation adapts the classifier on held-out `train` pairs and reports metrics on held-out `test` pairs. Use `--no_adapt` for zero-shot evaluation.
 
 ```bash
 python src/train.py \
   --data_root ./data/yuanhe \
   --species 1326 41514 77635 208964 \
-  --model_size 8M \
-  --fold 0 \
-  --seed 42 \
+  --model_size 8M --fold 0 --seed 42 \
   --out_dir ./output/yuanhe_seed42
-```
 
-The default model size is `8M`; `35M`, `150M`, and `650M` are also accepted
-when matching feature and hypergraph artifacts are available. The input width
-is inferred from the feature tensor, so it is not fixed to the 320 dimensions
-used by ESM-2 8M.
-
-## Evaluate
-
-Few-shot evaluation adapts only the classifier on the held-out species training
-split, then evaluates once on its test split:
-
-```bash
 python src/evaluate.py \
   --checkpoint ./output/yuanhe_seed42/best_model.pt \
-  --data_root ./data/yuanhe \
-  --species 208964 \
-  --fold 0 \
-  --threshold 0.5 \
-  --output ./output/yuanhe_seed42/test_metrics.json
+  --data_root ./data/yuanhe --species 208964 --fold 0 \
+  --threshold 0.5 --output ./output/yuanhe_seed42/test_metrics.json
 ```
 
-Use `--no_adapt` for an explicit no-target-adaptation evaluation. The command
-always reports Accuracy, Precision, Recall, F1, AUROC, and AUPRC.
+Main model defaults are listed in [`configs/yuanhe.yaml`](configs/yuanhe.yaml). `src/evaluate_with_stats.py` preserves seed-level results for existing checkpoints. The fixed threshold is 0.5 for Accuracy, Precision, Recall, and F1; AUROC and AUPRC use continuous scores.
 
-For one checkpoint per seed, preserve seed-level results rather than reporting
-only an aggregate:
+## Hyperedge Weights
 
-```bash
-python src/evaluate_with_stats.py \
-  --checkpoint_template './output/yuanhe_seed{seed}/best_model.pt' \
-  --data_root ./data/yuanhe \
-  --species 208964 \
-  --seeds 42 123 456 789 2023 \
-  --threshold 0.5 \
-  --output ./results/yuanhe_seed_level.json
-```
+Each hyperedge is one maximal clique from the undirected positive PPI graph. The released model constructs `dhg.Hypergraph(num_vertices, cliques)` without custom edge- or vertex-weight arrays. Under DHG 0.9.5, omitted `e_weight` and `v_weight` default to unit weights (1.0); no learned, degree-based, or size-based reweighting is applied. The library's incidence-based HGNN normalization is then used by the convolution layer. See the [DHG Hypergraph API](https://deephypergraph.readthedocs.io/en/latest/api/dhg.html).
 
-## Reviewer-Relevant Evidence
+## Reproducibility Materials
 
-The `reproduction/` directory contains compact, versioned evidence used by the
-revision:
+- [`REPRODUCTION.md`](REPRODUCTION.md): split semantics, model settings, seed schedules, and statistical-testing families.
+- [`reproduction/protocol_audit/`](reproduction/protocol_audit/): fixed-cutoff and pair-overlap audits.
+- [`reproduction/class_imbalance/`](reproduction/class_imbalance/): five-seed 1:1, 1:3, 1:5, and reference 1:9 results.
+- [`reproduction/baseline_comparison/`](reproduction/baseline_comparison/): direct HIGH-PPI/TRGH-PPI runs and comparisons.
+- [`reproduction/esm2_scale/`](reproduction/esm2_scale/): 30-seed ESM-2 scale summaries and corrected tests.
+- [`reproduction/hyperedge_size_distribution/`](reproduction/hyperedge_size_distribution/): per-species hyperedge counts and the appendix table.
+- [`reproduction/clique_biological_validation/`](reproduction/clique_biological_validation/): multi-species validation summary and representative enriched cliques.
+- `tests/test_ppi_preprocessing.py`: deterministic split, disjointness, and no-overwrite checks.
 
-- `protocol_audit/`: cutoff protocol, split-audit method, and documented
-  historical versus strict pair-disjoint controls.
-- `class_imbalance/`: five-seed 1:1, 1:3, 1:5, and reference 1:9 results.
-- `baseline_comparison/`: 30-seed direct TRGH-PPI/HIGH-PPI results and the
-  independent-comparison statistics against MHGNano-few.
-- `esm2_scale/`: 30 matched-seed ESM-2 scale results and corrected tests.
+Run the preprocessing tests with `python -m unittest discover -s tests -p 'test_ppi_preprocessing.py'`.
 
-Read [REPRODUCTION.md](REPRODUCTION.md) before interpreting a comparison.
-It records which analyses use matched paired seeds and which use independent
-tests, and it distinguishes the historical split files from the strict
-pair-disjoint control.
-
-The GO-enrichment and same-size random-control workflow used to assess the
-biological coherence of clique-derived hyperedges is implemented in
-`scripts/validate_cliques_biological.py`. It accepts a clique pickle, protein
-identifier mapping, and GO annotation file; those source databases are not
-redistributed.
-
-## Scope
-
-The numerical evidence is specific to the listed datasets, splits, feature
-artifacts, and evaluation protocols. It is not a claim of universal superiority
-over all PPI methods or all biological settings.
+The repository includes code and aggregate evidence, not licensed/raw input datasets, generated embeddings, model checkpoints, or exact historical split pickle files. Reproducing the published values requires the same source artifacts and fixed split files described in the paper and audit documents.
 
 ## License
 
-This repository is released under the MIT License. Please cite the MHGNano
-manuscript and the original data and baseline sources when using this code.
+Released under the MIT License. Please cite the MHGNano manuscript and original data and baseline sources when using this code.

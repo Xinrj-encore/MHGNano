@@ -10,7 +10,7 @@ before running Python scripts.
 
 ## Installation
 
-The released environment uses Python 3.8 or newer, PyTorch, DHG, NumPy,
+The released environment uses Python 3.10 or newer, PyTorch, DHG, NumPy,
 SciPy, pandas, scikit-learn, NetworkX, Transformers, and Biopython. A
 conda-based installation is:
 
@@ -57,10 +57,11 @@ reported experiments is:
    `facebook/esm2_t6_8M_UR50D`. Mean-pool the residue representations to
    obtain one feature vector per protein. The `35M`, `150M`, and `650M`
    ESM-2 variants can be used when matching feature files are available.
-6. Shuffle the labeled pair list and create five folds. Each fold contains
-   independent `train`, `val`, and `test` pair lists. The source-task
-   protocol uses `train` as support and `val` as query; held-out evaluation
-   uses target `train` as support and target `test` as query.
+6. Create deterministic stratified five-fold splits, with validation sampled
+   from each fold's trainval portion. Canonical pairs are exclusive to one of
+   `train`, `val`, or `test` within a fold. The source-task protocol uses
+   `train` as support and `val` as query; held-out evaluation uses target
+   `train` as support and target `test` as query.
 
 Each species directory must contain:
 
@@ -152,10 +153,11 @@ Reviewer-facing protocols, archived seed-level results, and scripts are in
 - `class_imbalance/`: 1:1, 1:3, 1:5, and reference 1:9 results;
 - `baseline_comparison/`: 30-seed TRGH-PPI and HIGH-PPI comparison results;
 - `esm2_scale/`: matched-seed ESM-2 scale results and corrected tests.
+- `hyperedge_size_distribution/`: per-species clique-size counts and the appendix table;
+- `clique_biological_validation/`: aggregate GO-enrichment and matched-size control results.
 
 The detailed evidence map and rerun boundaries are documented in
-[`github_repo/REPRODUCTION.md`](github_repo/REPRODUCTION.md). Main result
-tables are retained under `github_repo/tables_for_manuscript/`; generated
+[`github_repo/REPRODUCTION.md`](github_repo/REPRODUCTION.md). Generated
 checkpoints and runtime logs are written to the user-selected `output/`,
 `results/`, and `logs/` directories.
 
