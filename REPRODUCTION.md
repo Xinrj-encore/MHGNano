@@ -92,7 +92,7 @@ The `reproduction/` directory contains seed-level result tables, corrected summa
 
 ## Hyperedge-Size Distribution
 
-`reproduction/hyperedge_size_distribution/` contains the species-level counts and appendix table. To recompute the CSV from the prepared historical clique pickles, run from `github_repo/`:
+`reproduction/hyperedge_size_distribution/` contains the species-level counts and appendix table. To recompute the CSV from the prepared historical clique pickles, run from the repository root:
 
 ```bash
 python scripts/audit_hyperedge_sizes.py \

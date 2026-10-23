@@ -2,7 +2,7 @@
 
 `hyperedge_size_by_species.csv` contains the maximal-clique size counts used to prepare the appendix table. The `source` column is relative to the historical `meta/data/` directory; the input pickle files are not included in this repository.
 
-To regenerate the table from those trusted pickle files, run from `github_repo/`:
+To regenerate the table from those trusted pickle files, run from the repository root:
 
 ```bash
 python scripts/audit_hyperedge_sizes.py \

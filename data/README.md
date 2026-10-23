@@ -53,7 +53,7 @@ artifacts.
 
 ## File Use
 
-For the default 8M model, run the commands from `github_repo/` and set
+For the default 8M model, run the commands from the repository root and set
 `--data_root ./data/yuanhe` or `--data_root ./data/zhenhe`, as appropriate.
 Each species directory preserves the filenames expected by the released
 loader. The `nano/` directory is the target data for NAI evaluation. The larger
