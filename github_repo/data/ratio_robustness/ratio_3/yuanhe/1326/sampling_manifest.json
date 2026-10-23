@@ -1,0 +1,40 @@
+{
+  "domain": "yuanhe",
+  "fold": 0,
+  "pair_definition": "canonical unordered protein pair; both orientations stored for both classes",
+  "positive_cap_common_to_all_species": 7507,
+  "protocol": "pair-level class-ratio robustness",
+  "ratio_negative_to_positive": 3,
+  "seed": 42,
+  "source_negative_pool_canonical_pairs": 64995,
+  "source_positive_pool_canonical_pairs": 7838,
+  "species": "1326",
+  "split_fractions": {
+    "test": 0.2,
+    "train": 0.64,
+    "val": 0.16
+  },
+  "splits": {
+    "test": {
+      "canonical_negative_pairs": 4506,
+      "canonical_positive_pairs": 1502,
+      "stored_negative_examples": 9012,
+      "stored_negative_to_positive_ratio": 3,
+      "stored_positive_examples": 3004
+    },
+    "train": {
+      "canonical_negative_pairs": 14412,
+      "canonical_positive_pairs": 4804,
+      "stored_negative_examples": 28824,
+      "stored_negative_to_positive_ratio": 3,
+      "stored_positive_examples": 9608
+    },
+    "val": {
+      "canonical_negative_pairs": 3603,
+      "canonical_positive_pairs": 1201,
+      "stored_negative_examples": 7206,
+      "stored_negative_to_positive_ratio": 3,
+      "stored_positive_examples": 2402
+    }
+  }
+}

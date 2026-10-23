@@ -1,0 +1,44 @@
+{
+  "domain": "yuanhe",
+  "eligible_negative_pool_after_positive_selection": 46275,
+  "fold": 0,
+  "negative_endpoint_constraint": "every negative endpoint is in the positive-pair-induced protein universe",
+  "negative_pool_source": "union of legacy train/val/test index negatives",
+  "pair_definition": "canonical unordered protein pair; both orientations stored for both classes",
+  "positive_cap_common_to_all_species": 2482,
+  "positive_pool_source": "PPI_edge_list in PPI_cliques_Hyperedge_*_8M.pkl",
+  "protocol": "pair-level class-ratio robustness",
+  "ratio_negative_to_positive": 9,
+  "seed": 42,
+  "source_negative_pool_canonical_pairs": 78898,
+  "source_positive_pool_canonical_pairs": 8402,
+  "species": "41514",
+  "split_fractions": {
+    "test": 0.2,
+    "train": 0.64,
+    "val": 0.16
+  },
+  "splits": {
+    "test": {
+      "canonical_negative_pairs": 4473,
+      "canonical_positive_pairs": 497,
+      "stored_negative_examples": 8946,
+      "stored_negative_to_positive_ratio": 9,
+      "stored_positive_examples": 994
+    },
+    "train": {
+      "canonical_negative_pairs": 14292,
+      "canonical_positive_pairs": 1588,
+      "stored_negative_examples": 28584,
+      "stored_negative_to_positive_ratio": 9,
+      "stored_positive_examples": 3176
+    },
+    "val": {
+      "canonical_negative_pairs": 3573,
+      "canonical_positive_pairs": 397,
+      "stored_negative_examples": 7146,
+      "stored_negative_to_positive_ratio": 9,
+      "stored_positive_examples": 794
+    }
+  }
+}

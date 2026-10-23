@@ -21,3 +21,7 @@ analysis_resources/
 *.pkl
 *.pickle
 *.pdf
+
+# Published experimental inputs are intentional repository artifacts.
+!data/
+!data/**

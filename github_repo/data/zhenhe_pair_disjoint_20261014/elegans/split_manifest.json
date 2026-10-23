@@ -1,0 +1,94 @@
+{
+  "species": "elegans",
+  "seed": 42,
+  "source": "/Users/encore/project/MHGNano/meta/data/zhenhe/elegans",
+  "input_description": "PPI.csv and neg_network",
+  "method": "stratified five-fold split by unordered protein pair",
+  "folds": [
+    {
+      "train": {
+        "records": 70408,
+        "pairs": 62052,
+        "positive_records": 12794
+      },
+      "val": {
+        "records": 17596,
+        "pairs": 15514,
+        "positive_records": 3196
+      },
+      "test": {
+        "records": 21996,
+        "pairs": 19392,
+        "positive_records": 4010
+      }
+    },
+    {
+      "train": {
+        "records": 70371,
+        "pairs": 62052,
+        "positive_records": 12798
+      },
+      "val": {
+        "records": 17611,
+        "pairs": 15514,
+        "positive_records": 3200
+      },
+      "test": {
+        "records": 22018,
+        "pairs": 19392,
+        "positive_records": 4002
+      }
+    },
+    {
+      "train": {
+        "records": 70410,
+        "pairs": 62052,
+        "positive_records": 12808
+      },
+      "val": {
+        "records": 17602,
+        "pairs": 15514,
+        "positive_records": 3198
+      },
+      "test": {
+        "records": 21988,
+        "pairs": 19392,
+        "positive_records": 3994
+      }
+    },
+    {
+      "train": {
+        "records": 70406,
+        "pairs": 62053,
+        "positive_records": 12808
+      },
+      "val": {
+        "records": 17591,
+        "pairs": 15514,
+        "positive_records": 3202
+      },
+      "test": {
+        "records": 22003,
+        "pairs": 19391,
+        "positive_records": 3990
+      }
+    },
+    {
+      "train": {
+        "records": 70402,
+        "pairs": 62053,
+        "positive_records": 12792
+      },
+      "val": {
+        "records": 17603,
+        "pairs": 15514,
+        "positive_records": 3204
+      },
+      "test": {
+        "records": 21995,
+        "pairs": 19391,
+        "positive_records": 4004
+      }
+    }
+  ]
+}

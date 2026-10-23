@@ -1,0 +1,33 @@
+{
+  "domain": "yuanhe",
+  "linked_model_assets": [
+    "PPI.csv",
+    "Protein_list.csv",
+    "Protein_list_77635.pkl",
+    "pos_network_77635.tsv",
+    "neg_network_77635.tsv",
+    "PPI_cliques_Hyperedge_77635_8M.pkl",
+    "protein_feature_CT_77635_8M.pt"
+  ],
+  "source_fold": 0,
+  "source_negative_records": 90000,
+  "source_positive_records": 20000,
+  "species": "77635",
+  "splits": {
+    "test": {
+      "negative_records": 8082,
+      "negative_to_positive_ratio": 9.0,
+      "positive_records": 898
+    },
+    "train": {
+      "negative_records": 25848,
+      "negative_to_positive_ratio": 9.0,
+      "positive_records": 2872
+    },
+    "val": {
+      "negative_records": 6462,
+      "negative_to_positive_ratio": 9.0,
+      "positive_records": 718
+    }
+  }
+}

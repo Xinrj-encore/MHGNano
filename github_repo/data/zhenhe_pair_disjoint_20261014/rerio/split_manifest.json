@@ -1,0 +1,94 @@
+{
+  "species": "rerio",
+  "seed": 42,
+  "source": "/Users/encore/project/MHGNano/meta/data/zhenhe/rerio",
+  "input_description": "PPI.csv and neg_network",
+  "method": "stratified five-fold split by unordered protein pair",
+  "folds": [
+    {
+      "train": {
+        "records": 70406,
+        "pairs": 62408,
+        "positive_records": 12796
+      },
+      "val": {
+        "records": 17599,
+        "pairs": 15602,
+        "positive_records": 3194
+      },
+      "test": {
+        "records": 21995,
+        "pairs": 19503,
+        "positive_records": 4010
+      }
+    },
+    {
+      "train": {
+        "records": 70452,
+        "pairs": 62408,
+        "positive_records": 12806
+      },
+      "val": {
+        "records": 17569,
+        "pairs": 15602,
+        "positive_records": 3198
+      },
+      "test": {
+        "records": 21979,
+        "pairs": 19503,
+        "positive_records": 3996
+      }
+    },
+    {
+      "train": {
+        "records": 70402,
+        "pairs": 62408,
+        "positive_records": 12806
+      },
+      "val": {
+        "records": 17600,
+        "pairs": 15602,
+        "positive_records": 3190
+      },
+      "test": {
+        "records": 21998,
+        "pairs": 19503,
+        "positive_records": 4004
+      }
+    },
+    {
+      "train": {
+        "records": 70387,
+        "pairs": 62408,
+        "positive_records": 12794
+      },
+      "val": {
+        "records": 17600,
+        "pairs": 15603,
+        "positive_records": 3204
+      },
+      "test": {
+        "records": 22013,
+        "pairs": 19502,
+        "positive_records": 4002
+      }
+    },
+    {
+      "train": {
+        "records": 70423,
+        "pairs": 62408,
+        "positive_records": 12818
+      },
+      "val": {
+        "records": 17562,
+        "pairs": 15603,
+        "positive_records": 3194
+      },
+      "test": {
+        "records": 22015,
+        "pairs": 19502,
+        "positive_records": 3988
+      }
+    }
+  ]
+}

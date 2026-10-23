@@ -15,6 +15,7 @@ SciPy, pandas, scikit-learn, NetworkX, Transformers, and Biopython. A
 conda-based installation is:
 
 ```bash
+git lfs install
 git clone https://github.com/Xinrj-encore/MHGNano.git
 cd MHGNano/github_repo
 conda env create -f environment.yml
@@ -32,12 +33,31 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
+## Published Datasets
+
+The repository includes the prepared experimental inputs under
+[`github_repo/data/`](github_repo/data/): the historical eukaryotic PPI
+splits (`zhenhe`), prokaryotic PPI splits (`yuanhe`), and NAI pairs and
+sequences (`nano`). It also includes the class-ratio sensitivity splits
+(`ratio_robustness`), pair-disjoint controls, and randomized hyperedge control
+files. The PPI package includes pair networks, protein ID maps, clique
+hypergraphs, five-fold train/validation/test files, and frozen ESM-2 features,
+including available 35M/150M/650M scale variants. Binary
+tensors and pickle files are stored with Git LFS; install Git LFS before
+cloning to fetch them. Dataset contents, collection roles, and source
+attribution are documented in
+[`github_repo/data/README.md`](github_repo/data/README.md).
+
+The full STRING source downloads and per-species sequence FASTA files are not
+included. Processed positive/negative pair files and the supplied primary and
+sensitivity split files are included. The NAI pair/sequence source files are
+included with their upstream attribution.
+
 ## Preprocessing
 
-Raw STRING networks, protein sequences, and the NAI source files are not
-redistributed. The released training and evaluation code consumes the
-preprocessed artifacts listed below. The preprocessing protocol used for the
-reported experiments is:
+The published package contains the prepared model inputs. To build a new
+dataset, obtain the STRING protein-link and sequence files and follow this
+protocol:
 
 1. Read the STRING protein-link file and the corresponding protein FASTA
    file for each species.

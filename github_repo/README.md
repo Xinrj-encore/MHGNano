@@ -2,7 +2,13 @@
 
 MHGNano is a hypergraph meta-learning framework for cross-species protein--protein interaction (PPI) prediction and few-shot transfer to nanobody--antigen interaction (NAI) prediction. This repository contains the model, data-preparation entry points, training/evaluation commands, and reviewer-requested reproducibility evidence.
 
-Raw STRING/NAI datasets, protein feature tensors, checkpoints, and private assay data are not redistributed. Obtain source data from their providers and follow their terms. The paper's listed split files were treated as fixed inputs; the generator below creates a new deterministic split and does not claim to recreate historical split files byte-for-byte.
+The repository includes the prepared PPI and NAI datasets used by the
+experiments in [`data/`](data/), including class-ratio sensitivity splits and
+pair-disjoint and randomized-hyperedge controls. Raw full STRING downloads,
+per-species PPI FASTA source files, and trained checkpoints are not included.
+Binary feature tensors and split pickle files use Git LFS; install Git LFS
+before cloning. The dataset inventory and source attribution are in
+[`data/README.md`](data/README.md).
 
 ## Install
 
@@ -19,7 +25,7 @@ Run with Python 3.10 or newer. Choose a PyTorch build compatible with the local 
 
 ## Prepare PPI Data
 
-Download the STRING protein links file and matching protein FASTA for each organism. The script applies the manuscript sequence-length filter (51--800 aa), treats scores `>500` as positive and scores `<=500` as candidate negatives, retains up to 10,000 positives and up to nine candidate negatives per positive, and restricts candidate negatives to proteins in the positive-pair universe. It canonicalizes undirected pairs, removes duplicate pairs, and records input checksums and split counts in a manifest.
+To regenerate a new PPI dataset, download the STRING protein links file and matching protein FASTA for each organism. The script applies the manuscript sequence-length filter (51--800 aa), treats scores `>500` as positive and scores `<=500` as candidate negatives, retains up to 10,000 positives and up to nine candidate negatives per positive, and restricts candidate negatives to proteins in the positive-pair universe. It canonicalizes undirected pairs, removes duplicate pairs, and records input checksums and split counts in a manifest. The exact prepared inputs and supplied historical split files used in the manuscript are already included under `data/zhenhe/` and `data/yuanhe/`; the generator below is for creating a separate new dataset.
 
 ```bash
 python -m scripts.prepare_ppi_dataset \
@@ -90,7 +96,14 @@ Each hyperedge is one maximal clique from the undirected positive PPI graph. The
 
 Run the preprocessing tests with `python -m unittest discover -s tests -p 'test_ppi_preprocessing.py'`.
 
-The repository includes code and aggregate evidence, not licensed/raw input datasets, generated embeddings, model checkpoints, or exact historical split pickle files. Reproducing the published values requires the same source artifacts and fixed split files described in the paper and audit documents.
+The repository includes the processed model inputs, fixed split files,
+sensitivity/control split indices, seed-level evidence, and analysis code.
+Reproducing the published results does not require regenerating these inputs.
+The full STRING link tables and PPI FASTA source files are omitted; they can
+be obtained from STRING under its terms. The uploaded files retain the pair
+labels and feature tensors used by the model. See [`data/README.md`](data/README.md)
+for the collection-to-experiment mapping and notes on which split files share
+the primary networks and features.
 
 ## License
 

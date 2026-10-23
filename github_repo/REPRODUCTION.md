@@ -1,12 +1,12 @@
 # Reproduction Protocol
 
-This file describes the data, model, seed, and statistical procedures associated with the revision. It distinguishes manuscript runs that used fixed supplied split files from the deterministic split generator now included in this repository.
+This file describes the data, model, seed, and statistical procedures associated with the revision. The prepared model inputs, historical splits, and sensitivity/control split collections are distributed under `data/`; the deterministic split generator creates a separate new dataset.
 
 ## Inputs and Data Processing
 
-For each PPI species, the manuscript pipeline used STRING links and protein sequences, retained sequences of 51--800 amino acids, treated combined scores above 500 as positive and lower/equal scores as candidate negatives, capped positives at 10,000 and candidate negatives at 90,000, and required both negative-pair proteins to occur in the positive-pair protein universe. Source splits were fixed before model training. NAI labels were handled as a separate target-task dataset; the paper reports the retained positive and operational-negative counts by split in its NAI sample-count table.
+For each PPI species, the manuscript pipeline used STRING links and protein sequences, retained sequences of 51--800 amino acids, treated combined scores above 500 as positive and lower/equal scores as candidate negatives, capped positives at 10,000 and candidate negatives at 90,000, and required both negative-pair proteins to occur in the positive-pair protein universe. The prepared positive/negative pair tables, protein maps, clique files, features, and five-fold source split files are included in `data/zhenhe/` and `data/yuanhe/`. These supplied split files are unchanged. NAI pair/sequence inputs and prepared splits are in `data/nano/`; the retained split counts are also reported in the manuscript's NAI sample-count table.
 
-`scripts/prepare_ppi_dataset.py` makes these filtering rules executable and records checksums and counts. It canonicalizes undirected pairs and creates deterministic stratified five-fold splits with a validation subset drawn from each fold's trainval portion. These newly generated splits are pair-disjoint by construction. They are not byte-identical to the historical fixed split artifacts used in the manuscript; see `reproduction/protocol_audit/PAIR_SPLIT_AUDIT.md` for the historical split audit. Do not substitute generated splits when attempting to verify the manuscript's archived metrics.
+`scripts/prepare_ppi_dataset.py` makes these filtering rules executable and records checksums and counts. It canonicalizes undirected pairs and creates deterministic stratified five-fold splits with a validation subset drawn from each fold's trainval portion. These newly generated splits are pair-disjoint by construction. They are a separate option and must not replace the supplied historical split files when reproducing the manuscript results. See `reproduction/protocol_audit/PAIR_SPLIT_AUDIT.md` for the historical split audit.
 
 `scripts/extract_esm2_features.py` extracts frozen ESM-2 features in `Protein_list.csv` order. It uses `facebook/esm2_t6_8M_UR50D`, excludes special tokens, truncates at 800 residues, and mean-pools non-padding residue embeddings.
 
@@ -88,7 +88,7 @@ An external baseline is included for a benchmark when a prediction result/checkp
 
 ## Evidence and Re-run Limits
 
-The `reproduction/` directory contains seed-level result tables, corrected summary statistics, and protocol audits. The repository does not redistribute raw STRING/NAI files, historical split pickle files, protein embeddings, or checkpoints. Exact reproduction of the published tables requires the same input artifacts and fixed splits used for those runs. The new PPI preparation workflow is deterministic and suitable for generating a documented pair-disjoint dataset from the matching raw inputs.
+The `reproduction/` directory contains seed-level result tables, corrected summary statistics, and protocol audits. The `data/` directory contains the processed historical PPI and NAI model inputs, class-ratio splits, and pair-disjoint/randomized-hyperedge controls. Full source STRING link tables and PPI FASTA downloads are not included. The new PPI preparation workflow creates a separate deterministic pair-disjoint dataset from locally obtained STRING inputs. See `data/README.md` for each dataset collection and its role.
 
 ## Hyperedge-Size Distribution
 
@@ -100,7 +100,7 @@ python scripts/audit_hyperedge_sizes.py \
   --output reproduction/hyperedge_size_distribution/hyperedge_size_by_species.csv
 ```
 
-The required pickle files are listed in `scripts/audit_hyperedge_sizes.py`; the original split and feature files are not redistributed. The archived CSV uses relative source paths and records the hyperedge-size counts used for the appendix table.
+The required clique pickle files are listed in `scripts/audit_hyperedge_sizes.py` and are distributed under `data/zhenhe/`. The archived CSV uses relative source paths and records the hyperedge-size counts used for the appendix table.
 
 ## Clique Biological-Coherence Analysis
 
