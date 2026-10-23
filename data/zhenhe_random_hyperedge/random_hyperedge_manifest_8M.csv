@@ -1,6 +1,0 @@
-species,model_size,num_vertices,n_ppi_edges,n_hyperedges,size_min,size_median,size_mean,size_max,random_seed,duplicate_fallbacks,source_hyperedge_file,random_hyperedge_file
-cerevisiae,8M,3042,9336,5876,2,3.000,3.131,15,20260709,0,data/zhenhe/cerevisiae/PPI_cliques_Hyperedge_cerevisiae_8M.pkl,data/zhenhe_random_hyperedge/cerevisiae/PPI_cliques_Hyperedge_cerevisiae_8M.pkl
-melanogaster,8M,3901,9764,6907,2,2.000,2.863,6,21260712,0,data/zhenhe/melanogaster/PPI_cliques_Hyperedge_melanogaster_8M.pkl,data/zhenhe_random_hyperedge/melanogaster/PPI_cliques_Hyperedge_melanogaster_8M.pkl
-mouse,8M,4884,9900,7937,2,2.000,2.466,5,22260715,0,data/zhenhe/mouse/PPI_cliques_Hyperedge_mouse_8M.pkl,data/zhenhe_random_hyperedge/mouse/PPI_cliques_Hyperedge_mouse_8M.pkl
-rerio,8M,5029,9911,7375,2,2.000,2.529,6,23260718,0,data/zhenhe/rerio/PPI_cliques_Hyperedge_rerio_8M.pkl,data/zhenhe_random_hyperedge/rerio/PPI_cliques_Hyperedge_rerio_8M.pkl
-elegans,8M,4031,9883,6767,2,3.000,3.018,6,24260721,0,data/zhenhe/elegans/PPI_cliques_Hyperedge_elegans_8M.pkl,data/zhenhe_random_hyperedge/elegans/PPI_cliques_Hyperedge_elegans_8M.pkl

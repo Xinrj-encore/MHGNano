@@ -6,18 +6,24 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import torch
 
-from scripts.prepare_ppi_dataset import read_fasta
+try:
+    from scripts.prepare_ppi_dataset import read_fasta
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.prepare_ppi_dataset import read_fasta
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fasta", required=True, type=Path)
-    parser.add_argument("--species-dir", required=True, type=Path)
+    parser.add_argument("--data-root", required=True, type=Path)
+    parser.add_argument("--kingdom", required=True, choices=("eukaryotes", "prokaryotes"))
     parser.add_argument("--species", required=True)
     parser.add_argument("--model-name", default="facebook/esm2_t6_8M_UR50D")
     parser.add_argument("--model-tag", default="8M")
@@ -26,7 +32,7 @@ def main() -> None:
     parser.add_argument("--fasta-id-field", choices=("first-token", "description"), default="first-token")
     args = parser.parse_args()
 
-    species_dir = args.species_dir.resolve()
+    species_dir = (args.data_root / args.kingdom / args.species).resolve()
     mapping_path = species_dir / "Protein_list.csv"
     output_path = species_dir / f"protein_feature_CT_{args.species}_{args.model_tag}.pt"
     if not mapping_path.is_file():

@@ -1,110 +1,157 @@
 # MHGNano
 
-MHGNano is a hypergraph meta-learning framework for cross-species protein--protein interaction (PPI) prediction and few-shot transfer to nanobody--antigen interaction (NAI) prediction. This repository contains the model, data-preparation entry points, training/evaluation commands, and reviewer-requested reproducibility evidence.
+MHGNano predicts protein interactions with ESM-2 sequence representations, clique-derived hypergraphs, and MAML-based adaptation. This repository contains command-line workflows for preparing PPI data, extracting protein features, meta-training MHGNano, and evaluating a trained checkpoint on a target species or the NAI task.
 
-The repository includes the prepared PPI and NAI datasets used by the
-experiments in [`data/`](data/), including class-ratio sensitivity splits and
-pair-disjoint and randomized-hyperedge controls. Raw full STRING downloads,
-per-species PPI FASTA source files, and trained checkpoints are not included.
-Binary feature tensors and split pickle files use Git LFS; install Git LFS
-before cloning. The dataset inventory and source attribution are in
-[`data/README.md`](data/README.md).
+## Repository layout
 
-## Install
+- `training/`: MHGNano, MAML training, evaluation, data loading, and checkpoint code.
+- `scripts/prepare_ppi_dataset.py`: generic STRING PPI preprocessing and split generation.
+- `scripts/prepare_nai_dataset.py`: deterministic nanobody-antigen pair mapping and network export.
+- `scripts/extract_esm2_features.py`: frozen ESM-2 feature extraction.
+- `train_meta.py`: cross-species meta-training entry point.
+- `evaluate_cross_domain_checkpoint.py`: zero-shot and few-shot target evaluation entry point.
+- `meta_maml_nano.py`: compatibility entry point for checkpoint-only NAI evaluation.
+- `maml_statistics.py`: per-run evaluation CSV output and an optional statistical-report hook.
+- `data/`: example input and prepared data files. The preprocessing commands can also use data stored elsewhere.
+- `WORKFLOW.md`: a compact command reference for the main workflow.
+
+## Setup
+
+Use Python 3.10 or newer. Install the listed dependencies in a virtual environment:
 
 ```bash
-git clone https://github.com/Xinrj-encore/MHGNano.git
-cd MHGNano
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Run with Python 3.10 or newer. Choose a PyTorch build compatible with the local CUDA driver when using a GPU. The code was developed with DHG 0.9.5 and NetworkX 3.6.1.
+For GPU use, install a PyTorch build compatible with the installed CUDA version. ESM-2 weights are downloaded from Hugging Face the first time feature extraction runs. `requirements.txt` lists package names without pinned versions, so record the package and CUDA versions used for a particular result.
 
-## Prepare PPI Data
+## Data preparation
 
-To regenerate a new PPI dataset, download the STRING protein links file and matching protein FASTA for each organism. The script applies the manuscript sequence-length filter (51--800 aa), treats scores `>500` as positive and scores `<=500` as candidate negatives, retains up to 10,000 positives and up to nine candidate negatives per positive, and restricts candidate negatives to proteins in the positive-pair universe. It canonicalizes undirected pairs, removes duplicate pairs, and records input checksums and split counts in a manifest. The exact prepared inputs and supplied historical split files used in the manuscript are already included under `data/zhenhe/` and `data/yuanhe/`; the generator below is for creating a separate new dataset.
+### 1. Prepare a species dataset
+
+Provide a STRING links file and its matching protein FASTA. FASTA identifiers use the first header token by default, and sequences outside 51–800 residues are excluded. The default positive rule is `combined_score > 500`; candidate operational negatives have scores at or below 500 and are restricted to proteins present in the selected positive pairs. Up to 10,000 positive pairs are taken in input-file order, followed by up to nine negatives per positive in input-file order. These negatives are sampling labels, not experimentally confirmed non-interactions. The actual counts and ratio are written to `preprocessing_manifest.json`.
 
 ```bash
-python -m scripts.prepare_ppi_dataset \
-  --links ./raw/9606.protein.links.v12.0.txt \
-  --fasta ./raw/9606.protein.sequences.v12.0.fa \
-  --species 9606 \
-  --output-root ./data/yuanhe \
-  --positive-cap 10000 \
-  --negative-ratio 9 \
-  --folds 5 \
-  --validation-fraction 0.2 \
-  --split-seed 42
+python prepare_dataset.py \
+  --links /path/to/9606.protein.links.txt \
+  --fasta /path/to/9606.protein.sequences.fa \
+  --species human \
+  --kingdom eukaryotes \
+  --data-root data/generated
 ```
 
-This creates `data/yuanhe/9606/` containing the positive graph, maximal-clique hyperedges, five train/validation/test folds, protein ID mapping, and `preprocessing_manifest.json`. Output creation is exclusive: rerunning to an existing species directory stops instead of overwriting it.
+By default, the script creates five deterministic, pair-stratified folds using split seed 42. Within each fold, validation pairs are sampled from the training/validation portion. The output directory is not overwritten if it already exists. Maximal cliques are built from the positive interaction graph and saved as hyperedges with uniform weights.
 
-Within each fold, the splitter keeps each canonical undirected pair in exactly one of train, validation, or test, and approximately stratifies labels. It uses a deterministic stratified five-fold assignment, then samples validation from the remaining training portion. This is a clean regeneration workflow, not a replacement for the fixed split artifacts used to produce the manuscript tables.
+The generated directory contains `Protein_list.csv` and `Protein_list_<species>.pkl`, `PPI.csv`, positive and negative network TSV files, `PPI_cliques_Hyperedge_<species>_8M.pkl`, train/validation/test split pickles, and a preprocessing manifest.
 
-## Extract Frozen ESM-2 Features
+For the full preparation-to-training workflow, each species directory needs `Protein_list.csv` (used by feature extraction), `PPI_cliques_Hyperedge_<species>_<model-size>.pkl` (the loader falls back to the shared 8M hypergraph), `protein_feature_CT_<species>_<model-size>.pt`, and `train_idx_<species>.pkl`, `val_idx_<species>.pkl`, and `test_idx_<species>.pkl`. Custom split suffixes such as `_max` and `_min` are not selected automatically.
 
-Feature extraction reads `Protein_list.csv` and emits rows in its integer ID order. The default uses `facebook/esm2_t6_8M_UR50D`, no special tokens, truncation at 800 residues, and attention-mask mean pooling.
+### 2. Extract frozen ESM-2 features
+
+The default and example configuration uses the Hugging Face checkpoint `facebook/esm2_t6_8M_UR50D` (ESM-2, 8M variant; 320-dimensional embeddings). The encoder is frozen: the script mean-pools its token representations for each protein and truncates sequences at 800 tokens. Protein IDs are read in the order in `Protein_list.csv`. The feature tensor is saved in the species directory and existing tensors are not overwritten.
+
+The released CLI supports these ESM-2 sizes:
+
+| Size | Hugging Face checkpoint (`--model-name`) | Feature width (`--in-channels`) |
+| --- | --- | ---: |
+| 8M | `facebook/esm2_t6_8M_UR50D` | 320 |
+| 35M | `facebook/esm2_t12_35M_UR50D` | 480 |
+| 150M | `facebook/esm2_t30_150M_UR50D` | 640 |
+| 650M | `facebook/esm2_t33_650M_UR50D` | 1280 |
 
 ```bash
-python -m scripts.extract_esm2_features \
-  --fasta ./raw/9606.protein.sequences.v12.0.fa \
-  --species-dir ./data/yuanhe/9606 \
-  --species 9606 \
+python scripts/extract_esm2_features.py \
+  --fasta /path/to/9606.protein.sequences.fa \
+  --data-root data/generated \
+  --kingdom eukaryotes \
+  --species human \
   --model-name facebook/esm2_t6_8M_UR50D \
-  --model-tag 8M \
-  --batch-size 4
+  --model-tag 8M
 ```
 
-The first run downloads the model from Hugging Face unless it is already cached. The feature file is written as `protein_feature_CT_9606_8M.pt`; existing outputs are not overwritten.
+The resulting filename is `protein_feature_CT_<species>_<model-tag>.pt`; for the default checkpoint this is `protein_feature_CT_<species>_8M.pt`. Keep the checkpoint, `--model-tag`, `--model-size`, and `--in-channels` consistent across feature extraction, training, and evaluation. Do not relabel a feature tensor from one checkpoint as another model size.
 
-## Train and Evaluate
+### Prepare the NAI pair mapping
 
-The last species listed is held out. Source `train` pairs are support and source `val` pairs are query during meta-training. Few-shot evaluation adapts the classifier on held-out `train` pairs and reports metrics on held-out `test` pairs. Use `--no_adapt` for zero-shot evaluation.
+The pair file contains tab-separated nanobody ID, antigen ID, and binary label columns; a header is optional. FASTA records containing `nb` in the header are treated as nanobodies, and the remaining records as antigens. The CLI can also handle reversed pair order. It uses the bundled pair-label TSV and FASTA by default, writes to a new `data/nano/generated` directory, and refuses to overwrite an existing output directory:
 
 ```bash
-python src/train.py \
-  --data_root ./data/yuanhe \
-  --species 1326 41514 77635 208964 \
-  --model_size 8M --fold 0 --seed 42 \
-  --out_dir ./output/yuanhe_seed42
-
-python src/evaluate.py \
-  --checkpoint ./output/yuanhe_seed42/best_model.pt \
-  --data_root ./data/yuanhe --species 208964 --fold 0 \
-  --threshold 0.5 --output ./output/yuanhe_seed42/test_metrics.json
+python data/nano/process.py \
+  --pairs data/nano/all_pair_data.pair.tsv \
+  --fasta data/nano/all_pair_data.seqs.fasta \
+  --output-dir data/nano/generated
 ```
 
-Main model defaults are listed in [`configs/yuanhe.yaml`](configs/yuanhe.yaml). `src/evaluate_with_stats.py` preserves seed-level results for existing checkpoints. The fixed threshold is 0.5 for Accuracy, Precision, Recall, and F1; AUROC and AUPRC use continuous scores.
+Nanobody and antigen sequences are deduplicated separately; duplicate sequences use the lexicographically smallest original FASTA ID as the canonical ID. Negative pairs are retained only when both proteins occur in a positive pair. The output includes a stable `Protein_list.csv`, positive/negative TSV files, the legacy `Protein_list_nano.pkl`, and an input-hash/count manifest. This step does not generate train/validation/test splits or ESM-2 features. With the bundled inputs, this preprocessing produces 228 positive-participating proteins, while the checked-in legacy feature tensor has 101 rows. Regenerate all dependent features and splits before combining newly generated files with legacy artifacts.
 
-## Hyperedge Weights
+## Training and evaluation
 
-Each hyperedge is one maximal clique from the undirected positive PPI graph. The released model constructs `dhg.Hypergraph(num_vertices, cliques)` without custom edge- or vertex-weight arrays. Under DHG 0.9.5, omitted `e_weight` and `v_weight` default to unit weights (1.0); no learned, degree-based, or size-based reweighting is applied. The library's incidence-based HGNN normalization is then used by the convolution layer. See the [DHG Hypergraph API](https://deephypergraph.readthedocs.io/en/latest/api/dhg.html).
+### Meta-train across species
 
-## Reproducibility Materials
+Training, validation, and test species must be disjoint. The names must match the species directories and artifact prefixes. This example uses prepared data under `data/eukaryotes/`:
 
-- [`REPRODUCTION.md`](REPRODUCTION.md): split semantics, model settings, seed schedules, and statistical-testing families.
-- [`reproduction/protocol_audit/`](reproduction/protocol_audit/): fixed-cutoff and pair-overlap audits.
-- [`reproduction/class_imbalance/`](reproduction/class_imbalance/): five-seed 1:1, 1:3, 1:5, and reference 1:9 results.
-- [`reproduction/baseline_comparison/`](reproduction/baseline_comparison/): direct HIGH-PPI/TRGH-PPI runs and comparisons.
-- [`reproduction/esm2_scale/`](reproduction/esm2_scale/): 30-seed ESM-2 scale summaries and corrected tests.
-- [`reproduction/hyperedge_size_distribution/`](reproduction/hyperedge_size_distribution/): per-species hyperedge counts and the appendix table.
-- [`reproduction/clique_biological_validation/`](reproduction/clique_biological_validation/): multi-species validation summary and representative enriched cliques.
-- `tests/test_ppi_preprocessing.py`: deterministic split, disjointness, and no-overwrite checks.
+```bash
+python train_meta.py \
+  --data-root data \
+  --kingdom eukaryotes \
+  --train-species cerevisiae elegans melanogaster \
+  --validation-species mouse \
+  --test-species rat \
+  --model-size 8M \
+  --inner-lr 1e-3 \
+  --inner-steps 5 \
+  --meta-lr 1e-4 \
+  --meta-batch-size 3 \
+  --seed 42 \
+  --out-dir output/eukaryote_run_42 \
+  --no-stats-report
+```
 
-Run the preprocessing tests with `python -m unittest discover -s tests -p 'test_ppi_preprocessing.py'`.
+The default training limit is 20,000 epochs, with validation every two epochs and early stopping. The best checkpoint is written to `best_mhgnano.pt`; per-run evaluation metrics are appended to `maml_eval_metrics.csv` in the output directory. Run once per seed, using a distinct output directory for each checkpoint.
 
-The repository includes the processed model inputs, fixed split files,
-sensitivity/control split indices, seed-level evidence, and analysis code.
-Reproducing the published results does not require regenerating these inputs.
-The full STRING link tables and PPI FASTA source files are omitted; they can
-be obtained from STRING under its terms. The uploaded files retain the pair
-labels and feature tensors used by the model. See [`data/README.md`](data/README.md)
-for the collection-to-experiment mapping and notes on which split files share
-the primary networks and features.
+For a prokaryotic run, set `--kingdom prokaryotes`. For a mixed-domain run, use repeatable `--species-dir SPECIES=PATH` arguments for species outside the common kingdom directory. See `python train_meta.py --help` for model, loss, and sampling options.
 
-## License
+`--seed` controls the training run; `--split-seed` controls preprocessing folds. They are separate settings. Each training command runs one seed and writes `best_mhgnano.pt` plus `maml_eval_metrics.csv` under its output directory.
 
-Released under the MIT License. Please cite the MHGNano manuscript and original data and baseline sources when using this code.
+### Evaluate a checkpoint on a target domain
+
+The evaluator loads a saved checkpoint and reports metrics before and after inner-loop adaptation. The before-adaptation values are zero-shot results; the after-adaptation values use labeled pairs sampled from the target training split. Both are measured on the target test split. The support set contains up to 64 pairs by default, sampled in proportion to the target training split's class counts; the classification threshold is 0.5. The current inner loop updates classifier parameters only; the ESM-2 embeddings remain frozen and the hypergraph encoder stays at its checkpoint weights.
+
+Example: evaluate an eukaryote-trained checkpoint on a prokaryotic species:
+
+```bash
+python evaluate_cross_domain_checkpoint.py \
+  --data-root data \
+  --species-dir 1326=data/prokaryotes/1326 \
+  --train-species cerevisiae elegans melanogaster \
+  --validation-species mouse \
+  --test-species 1326 \
+  --checkpoint-path output/eukaryote_run_42/best_mhgnano.pt \
+  --support-size 64 \
+  --seed 42 \
+  --out-dir output/euk_to_prok_42 \
+  --no-stats-report
+```
+
+For NAI evaluation, pass its data directory explicitly, for example `--species-dir nano=data/nano` and `--test-species nano`. The checkpoint, feature dimensions, and model configuration must match. `--train-species` and `--validation-species` identify the source setting for output metadata and the disjoint-species check; the evaluator loads the target data and the supplied checkpoint.
+
+`meta_maml_nano.py` is a compatibility entry point for checkpoint evaluation; it does not train a model. For example, evaluate an eukaryote-trained checkpoint on the bundled NAI data:
+
+```bash
+python meta_maml_nano.py \
+  --data-root data \
+  --species-dir nano=data/nano \
+  --train-species cerevisiae elegans melanogaster \
+  --validation-species mouse \
+  --test-species nano \
+  --checkpoint-path output/eukaryote_run_42/best_mhgnano.pt \
+  --support-size 64 \
+  --seed 42 \
+  --out-dir output/nai_eval_42 \
+  --no-stats-report
+```
+
+The `before_eval` row in the output CSV records zero-shot metrics; `after_eval` records metrics after adapting on the sampled NAI support pairs. Set the source species to match the checkpoint's actual training setting. The CSV is written to `--results-csv` if supplied, otherwise `<out-dir>/maml_eval_metrics.csv`; `--no-stats-report` skips the optional report hook.

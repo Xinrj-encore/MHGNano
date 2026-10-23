@@ -10,140 +10,35 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
-import math
 import os
 import pickle
-import random
 import shutil
 import tempfile
-from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from .data_io import iter_string_links, read_fasta, sha256_file
+    from .split_data import make_splits
+except ImportError:
+    import sys
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def read_fasta(path: Path, id_field: str = "first-token") -> dict[str, str]:
-    """Read FASTA records, retaining sequences of length 51 through 800."""
-    if id_field not in {"first-token", "description"}:
-        raise ValueError("id_field must be 'first-token' or 'description'")
-    sequences: dict[str, str] = {}
-    header: str | None = None
-    chunks: list[str] = []
-
-    def save_record() -> None:
-        if header is None:
-            return
-        sequence = "".join(chunks).replace(" ", "").upper()
-        identifier = header.split(maxsplit=1)[0] if id_field == "first-token" else header
-        if 51 <= len(sequence) <= 800:
-            if identifier in sequences and sequences[identifier] != sequence:
-                raise ValueError(f"Conflicting FASTA sequences for {identifier!r}")
-            sequences[identifier] = sequence
-
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith(">"):
-                save_record()
-                header = line[1:].strip()
-                if not header:
-                    raise ValueError(f"Empty FASTA header at {path}:{line_number}")
-                chunks = []
-            elif header is None:
-                raise ValueError(f"Sequence data before first FASTA header at {path}:{line_number}")
-            else:
-                chunks.append(line)
-    save_record()
-    return sequences
-
-
-def iter_string_links(path: Path) -> Iterable[tuple[str, str, int]]:
-    """Stream STRING links rows (protein1 protein2 combined_score)."""
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            fields = line.split()
-            if not fields:
-                continue
-            if len(fields) < 3:
-                raise ValueError(f"Expected 3 columns at {path}:{line_number}")
-            try:
-                score = int(fields[2])
-            except ValueError:
-                if line_number == 1 or fields[2].lower() in {"combined_score", "score"}:
-                    continue
-                raise ValueError(f"Non-integer confidence score at {path}:{line_number}")
-            if fields[0] != fields[1]:
-                yield fields[0], fields[1], score
-
-
-def stratified_folds(labels: list[int], n_splits: int, seed: int) -> list[tuple[list[int], list[int]]]:
-    """Return deterministic stratified (train-validation, test) index folds."""
-    if n_splits < 2:
-        raise ValueError("n_splits must be at least 2")
-    by_class: dict[int, list[int]] = defaultdict(list)
-    for index, label in enumerate(labels):
-        by_class[label].append(index)
-    if set(by_class) != {0, 1} or any(len(rows) < n_splits for rows in by_class.values()):
-        raise ValueError("Each class must contain at least n_splits records")
-
-    test_folds: list[list[int]] = [[] for _ in range(n_splits)]
-    for label in sorted(by_class):
-        rows = by_class[label]
-        random.Random(f"{seed}:{label}:folds").shuffle(rows)
-        for fold_index, row in enumerate(rows):
-            test_folds[fold_index % n_splits].append(row)
-    all_indices = set(range(len(labels)))
-    return [
-        (sorted(all_indices - set(test_indices)), sorted(test_indices))
-        for test_indices in test_folds
-    ]
-
-
-def make_splits(
-    pairs: list[list[int]], labels: list[int], n_splits: int, seed: int, validation_fraction: float
-) -> dict[str, list[list[object]]]:
-    """Create stratified folds with a validation subset drawn from trainval."""
-    if not 0 < validation_fraction < 1:
-        raise ValueError("validation_fraction must be strictly between 0 and 1")
-    split_records: dict[str, list[list[object]]] = {name: [] for name in ("train", "val", "test")}
-    for fold_index, (trainval_indices, test_indices) in enumerate(stratified_folds(labels, n_splits, seed)):
-        train_indices: list[int] = []
-        val_indices: list[int] = []
-        for label in (0, 1):
-            rows = [index for index in trainval_indices if labels[index] == label]
-            random.Random(f"{seed}:{fold_index}:{label}:validation").shuffle(rows)
-            n_val = max(1, math.ceil(len(rows) * validation_fraction))
-            if n_val >= len(rows):
-                raise ValueError("Not enough examples per class for train and validation")
-            val_indices.extend(rows[:n_val])
-            train_indices.extend(rows[n_val:])
-
-        for split_name, indices in (
-            ("train", train_indices),
-            ("val", val_indices),
-            ("test", test_indices),
-        ):
-            random.Random(f"{seed}:{fold_index}:{split_name}:order").shuffle(indices)
-            split_records[split_name].append(
-                [[pairs[index] for index in indices], [float(labels[index]) for index in indices]]
-            )
-    return split_records
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.data_io import iter_string_links, read_fasta, sha256_file
+    from scripts.split_data import make_splits
 
 
 def _write_tsv(path: Path, header: Iterable[str], rows: Iterable[Iterable[object]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(header)
+        writer.writerows(rows)
+
+
+def _write_csv(path: Path, header: Iterable[str], rows: Iterable[Iterable[object]]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(header)
         writer.writerows(rows)
 
@@ -225,8 +120,8 @@ def prepare_dataset(
     try:
         with (temp_path / f"Protein_list_{species}.pkl").open("xb") as handle:
             pickle.dump(protein_ids, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        _write_tsv(temp_path / "Protein_list.csv", ("Entry", "ID"), node_id.items())
-        _write_tsv(
+        _write_csv(temp_path / "Protein_list.csv", ("Entry", "ID"), node_id.items())
+        _write_csv(
             temp_path / "PPI.csv",
             ("protein1", "protein2", "combined_score"),
             ((node_id[a], node_id[b], score) for a, b, score in positives),
@@ -312,7 +207,12 @@ def main() -> None:
     parser.add_argument("--links", required=True, type=Path, help="STRING protein.links file")
     parser.add_argument("--fasta", required=True, type=Path, help="Matching STRING protein FASTA")
     parser.add_argument("--species", required=True, help="Species label used in output filenames")
-    parser.add_argument("--output-root", type=Path, default=Path("./data/yuanhe"))
+    parser.add_argument("--data-root", type=Path, default=Path("./data"))
+    parser.add_argument(
+        "--kingdom",
+        choices=("eukaryotes", "prokaryotes"),
+        help="Optional subdirectory under --data-root for consistent dataset grouping.",
+    )
     parser.add_argument("--positive-score-cutoff", type=int, default=500)
     parser.add_argument("--positive-cap", type=int, default=10_000)
     parser.add_argument("--negative-ratio", type=int, default=9)
@@ -321,10 +221,11 @@ def main() -> None:
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--fasta-id-field", choices=("first-token", "description"), default="first-token")
     args = parser.parse_args()
+    output_root = args.data_root / args.kingdom if args.kingdom else args.data_root
     output = prepare_dataset(
         args.links,
         args.fasta,
-        args.output_root,
+        output_root,
         args.species,
         positive_score_cutoff=args.positive_score_cutoff,
         positive_cap=args.positive_cap,
