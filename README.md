@@ -47,7 +47,7 @@ By default, the script creates five deterministic, pair-stratified folds using s
 
 The generated directory contains `Protein_list.csv` and `Protein_list_<species>.pkl`, `PPI.csv`, positive and negative network TSV files, `PPI_cliques_Hyperedge_<species>_8M.pkl`, train/validation/test split pickles, and a preprocessing manifest.
 
-For the full preparation-to-training workflow, each species directory needs `Protein_list.csv` (used by feature extraction), `PPI_cliques_Hyperedge_<species>_<model-size>.pkl` (the loader falls back to the shared 8M hypergraph), `protein_feature_CT_<species>_<model-size>.pt`, and `train_idx_<species>.pkl`, `val_idx_<species>.pkl`, and `test_idx_<species>.pkl`. Custom split suffixes such as `_max` and `_min` are not selected automatically.
+For the full preparation-to-training workflow, each species directory needs `Protein_list.csv` (used by feature extraction), `PPI_cliques_Hyperedge_<species>_<model-size>.pkl` (the loader falls back to the shared 8M hypergraph), `protein_feature_CT_<species>_<model-size>.pt`, and `train_idx_<species>.pkl`, `val_idx_<species>.pkl`, and `test_idx_<species>.pkl`. 
 
 ### 2. Extract frozen ESM-2 features
 
